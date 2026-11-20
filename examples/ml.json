@@ -1,0 +1,121 @@
+{
+  "title": "Plataforma de ML con tres tipos de recursos",
+  "nodes": [
+    {
+      "id": "feature-store",
+      "label": "Feature store",
+      "type": "service",
+      "description": ""
+    },
+    {
+      "id": "trainer-a",
+      "label": "Entrenador A",
+      "type": "job",
+      "description": ""
+    },
+    {
+      "id": "trainer-b",
+      "label": "Entrenador B",
+      "type": "job",
+      "description": ""
+    },
+    {
+      "id": "trainer-c",
+      "label": "Entrenador C",
+      "type": "job",
+      "description": ""
+    },
+    {
+      "id": "gpu-1",
+      "label": "GPU 1",
+      "type": "external",
+      "description": ""
+    },
+    {
+      "id": "gpu-2",
+      "label": "GPU 2",
+      "type": "external",
+      "description": ""
+    },
+    {
+      "id": "gpu-3",
+      "label": "GPU 3",
+      "type": "external",
+      "description": ""
+    }
+  ],
+  "edges": [
+    {
+      "source": "trainer-a",
+      "target": "gpu-1",
+      "kind": "dependency",
+      "reason": "puede ejecutarse en esa GPU"
+    },
+    {
+      "source": "trainer-a",
+      "target": "gpu-2",
+      "kind": "dependency",
+      "reason": "puede ejecutarse en esa GPU"
+    },
+    {
+      "source": "trainer-a",
+      "target": "gpu-3",
+      "kind": "dependency",
+      "reason": "puede ejecutarse en esa GPU"
+    },
+    {
+      "source": "trainer-b",
+      "target": "gpu-1",
+      "kind": "dependency",
+      "reason": "puede ejecutarse en esa GPU"
+    },
+    {
+      "source": "trainer-b",
+      "target": "gpu-2",
+      "kind": "dependency",
+      "reason": "puede ejecutarse en esa GPU"
+    },
+    {
+      "source": "trainer-b",
+      "target": "gpu-3",
+      "kind": "dependency",
+      "reason": "puede ejecutarse en esa GPU"
+    },
+    {
+      "source": "trainer-c",
+      "target": "gpu-1",
+      "kind": "dependency",
+      "reason": "puede ejecutarse en esa GPU"
+    },
+    {
+      "source": "trainer-c",
+      "target": "gpu-2",
+      "kind": "dependency",
+      "reason": "puede ejecutarse en esa GPU"
+    },
+    {
+      "source": "trainer-c",
+      "target": "gpu-3",
+      "kind": "dependency",
+      "reason": "puede ejecutarse en esa GPU"
+    },
+    {
+      "source": "trainer-a",
+      "target": "feature-store",
+      "kind": "dependency",
+      "reason": "lee features"
+    },
+    {
+      "source": "trainer-a",
+      "target": "trainer-b",
+      "kind": "conflict",
+      "reason": "comparten el feature store en escritura"
+    },
+    {
+      "source": "trainer-b",
+      "target": "trainer-c",
+      "kind": "conflict",
+      "reason": "comparten checkpoint en disco"
+    }
+  ]
+}

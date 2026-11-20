@@ -1,0 +1,127 @@
+{
+  "title": "Pipeline de datos diario",
+  "nodes": [
+    {
+      "id": "ingest-sales",
+      "label": "Ingesta de ventas",
+      "type": "task",
+      "description": ""
+    },
+    {
+      "id": "ingest-web",
+      "label": "Ingesta de logs web",
+      "type": "task",
+      "description": ""
+    },
+    {
+      "id": "clean-data",
+      "label": "Limpieza",
+      "type": "task",
+      "description": ""
+    },
+    {
+      "id": "enrich-geo",
+      "label": "Enriquecimiento geografico",
+      "type": "task",
+      "description": ""
+    },
+    {
+      "id": "train-model",
+      "label": "Entrenamiento",
+      "type": "task",
+      "description": ""
+    },
+    {
+      "id": "build-dashboard",
+      "label": "Dashboard",
+      "type": "task",
+      "description": ""
+    },
+    {
+      "id": "export-report",
+      "label": "Exportar reporte",
+      "type": "task",
+      "description": ""
+    },
+    {
+      "id": "warehouse",
+      "label": "Data warehouse",
+      "type": "database",
+      "description": ""
+    }
+  ],
+  "edges": [
+    {
+      "source": "clean-data",
+      "target": "ingest-sales",
+      "kind": "dependency",
+      "reason": "usa los datos crudos"
+    },
+    {
+      "source": "clean-data",
+      "target": "ingest-web",
+      "kind": "dependency",
+      "reason": "usa los datos crudos"
+    },
+    {
+      "source": "enrich-geo",
+      "target": "clean-data",
+      "kind": "dependency",
+      "reason": "requiere datos limpios"
+    },
+    {
+      "source": "train-model",
+      "target": "enrich-geo",
+      "kind": "dependency",
+      "reason": "features geograficas"
+    },
+    {
+      "source": "build-dashboard",
+      "target": "warehouse",
+      "kind": "dependency",
+      "reason": "lee agregados"
+    },
+    {
+      "source": "export-report",
+      "target": "build-dashboard",
+      "kind": "dependency",
+      "reason": "mismos agregados"
+    },
+    {
+      "source": "ingest-sales",
+      "target": "warehouse",
+      "kind": "dependency",
+      "reason": "escribe"
+    },
+    {
+      "source": "ingest-web",
+      "target": "warehouse",
+      "kind": "conflict",
+      "reason": "escritura exclusiva en la misma particion"
+    },
+    {
+      "source": "ingest-sales",
+      "target": "ingest-web",
+      "kind": "conflict",
+      "reason": "mismo ancho de banda del enlace"
+    },
+    {
+      "source": "train-model",
+      "target": "enrich-geo",
+      "kind": "conflict",
+      "reason": "ambos usan la unica GPU"
+    },
+    {
+      "source": "train-model",
+      "target": "build-dashboard",
+      "kind": "conflict",
+      "reason": "memoria del nodo compartido"
+    },
+    {
+      "source": "build-dashboard",
+      "target": "export-report",
+      "kind": "conflict",
+      "reason": "mismo cache de consultas"
+    }
+  ]
+}
