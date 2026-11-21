@@ -1,0 +1,10 @@
+titulo: Horario de exámenes finales
+# Cada examen usa a los estudiantes matriculados (un estudiante no puede estar en dos exámenes a la vez)
+Cálculo [2]: ana, beto, carla, diego
+Física [2]: ana, eva, fabio
+Discreta II [3]: beto, carla, gaby
+Programación [2]: diego, eva, hugo
+Inglés [1]: fabio, gaby, hugo
+Química [2]: ana, hugo
+Estadística [2]: carla, fabio
+Ética [1]: iris

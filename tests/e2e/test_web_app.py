@@ -5,14 +5,12 @@ Prueba E2E de la app web: Chromium real + Pyodide ejecutando el codigo Python de
     E2E_BROWSER_CHANNEL=chromium uv run --group e2e pytest -m e2e
     E2E_SCREENSHOTS=/ruta uv run --group e2e pytest -m e2e   # guarda capturas
 
-Requiere red (descarga Pyodide y las bibliotecas JS de los CDN). Solo usa el modo offline: no
-llama a ningun LLM ni necesita API key.
+Requiere red (descarga Pyodide y Cytoscape de los CDN).
 """
 from __future__ import annotations
 
 import http.server
 import os
-import re
 import threading
 from functools import partial
 from pathlib import Path
@@ -50,7 +48,8 @@ def page(site_url):
         pg.errors = []
         pg.on("pageerror", lambda exc: pg.errors.append(str(exc)))
         pg.goto(site_url)
-        expect(pg.locator("#status")).to_have_text("Python listo", timeout=PYODIDE_TIMEOUT_MS)
+        expect(pg.locator("#output")).to_be_visible(timeout=PYODIDE_TIMEOUT_MS)    # corre el 1er ejemplo
+        expect(pg.locator("#status")).to_have_text("Listo", timeout=ANALYZE_TIMEOUT_MS)
         yield pg
         browser.close()
 
@@ -62,66 +61,84 @@ def _shot(page: Page, name: str) -> None:
         page.screenshot(path=str(Path(folder) / f"{name}.png"), full_page=True)
 
 
-def _run(page: Page) -> None:
-    page.click("#run")
-    expect(page.locator("#run")).to_have_text("Analizar", timeout=ANALYZE_TIMEOUT_MS)
+def _wait_idle(page: Page) -> None:
+    expect(page.locator("#run")).to_have_text("Asignar lotes", timeout=ANALYZE_TIMEOUT_MS)
+    expect(page.locator("#status")).to_have_text("Listo", timeout=ANALYZE_TIMEOUT_MS)
 
 
-def test_natural_language_offline_produces_plan_and_crossing_free_drawing(page: Page):
-    # Arrange
-    page.fill("#text", "Arquitectura de e-commerce con pagos, inventario y notificaciones")
-    # Act
-    _run(page)
-    # Assert
-    expect(page.locator("#output")).to_be_visible()
-    expect(page.locator("#metrics")).to_contain_text("χ(G) = 4 (exacto)")
-    expect(page.locator("#crossings")).to_have_text("0 cruce(s) en el dibujo")
+def _metric(page: Page, key: str):
+    return page.locator(f".metric[data-metric={key}] .v")
+
+
+def test_first_example_runs_on_load_and_shows_batches(page: Page):
+    expect(page.locator("#metrics")).to_contain_text("χ(G) = 4")
+    expect(_metric(page, "colors")).to_have_text("4")
     expect(page.locator("#plan")).to_contain_text("Lote 4")
+    expect(page.locator("#step-label")).to_have_text("Paso 12/12")
     assert page.evaluate("document.querySelectorAll('#cy canvas').length") > 0
-    _shot(page, "01-ecommerce-planar")
+    _shot(page, "01-microservicios")
     assert not page.errors
 
 
-def test_non_planar_example_shows_kuratowski_and_virtual_nodes(page: Page):
+def test_step_by_step_explains_each_decision(page: Page):
     # Arrange
-    page.click("[data-mode=example]")
-    page.select_option("#example", "ml")
+    page.click("#step-first")
+    expect(page.locator("#inspector")).to_contain_text("Paso 0")
     # Act
-    _run(page)
+    page.locator("#step").fill("3")
     # Assert
-    expect(page.locator("#metrics")).to_contain_text("K3,3")
-    expect(page.locator("#kura-wrap")).to_be_visible()
-    page.check("#kura")
-    expect(page.locator("#crossings")).to_have_text("0 cruce(s) en el dibujo")
-    _shot(page, "02-ml-kuratowski")
-    page.click("[data-layout=spring]")
-    expect(page.locator("#crossings")).to_have_text(re.compile(r"^[1-9]\d* cruce"))
-    _shot(page, "03-ml-spring")
-    page.click("[data-layout=planar]")
+    expect(page.locator("#step-label")).to_have_text("Paso 3/12")
+    expect(page.locator("#inspector")).to_contain_text("DSatur elige la tarea con mayor saturación")
+    _shot(page, "02-paso-a-paso")
+    page.click("#step-play")
+    expect(page.locator("#step-label")).to_have_text("Paso 12/12", timeout=15_000)
+    expect(page.locator("#inspector")).to_contain_text("Coloración completa")
 
 
-def test_report_matrix_and_times_tabs(page: Page):
-    page.click("[data-tab=report]")
-    expect(page.locator("#report")).to_contain_text("Datos verificados")
-    _shot(page, "04-report")
+def test_corona_example_shows_welsh_powell_uses_more_batches(page: Page):
+    # Arrange
+    page.select_option("#algorithm", "welsh_powell")
+    # Act
+    page.select_option("#example", "corona")
+    _wait_idle(page)
+    # Assert
+    expect(_metric(page, "colors")).to_have_text("5")
+    expect(_metric(page, "alternative")).to_have_text("2")
+    expect(page.locator("#metrics")).to_contain_text("χ(G) = 2")
+    page.click("[data-layout=batches]")
+    page.check("#clique")
+    _shot(page, "03-corona-por-lotes")
+    page.uncheck("#clique")
+    page.click("[data-layout=force]")
+    page.select_option("#algorithm", "dsatur")
+
+
+def test_detail_tabs(page: Page):
+    page.select_option("#example", "examenes")
+    _wait_idle(page)
+    page.click("[data-tab=resources]")
+    expect(page.locator("#resources table")).to_contain_text("K3")
     page.click("[data-tab=matrix]")
     expect(page.locator("#matrix table")).to_be_visible()
     page.click("[data-tab=times]")
-    expect(page.locator("#times")).to_contain_text("Dibujo plano")
+    expect(page.locator("#times")).to_contain_text("Coloración")
+    page.click("[data-tab=plan]")
+    expect(page.locator("#plan .gantt-bar").first).to_be_visible()
+    _shot(page, "04-examenes-gantt")
 
 
-def test_invalid_json_shows_friendly_error(page: Page):
-    page.click("[data-mode=json]")
-    page.fill("#spec-json", '{"nodes": [{"id": "a", "label": "A"}], "edges": [{"source": "a", "target": "z", "kind": "conflict"}]}')
-    _run(page)
-    expect(page.locator(".alert-error")).to_contain_text("nodos inexistentes")
-
-
-def test_anthropic_without_key_is_blocked_client_side(page: Page):
-    page.select_option("#provider", "anthropic")
-    page.fill("#api-key", "")
-    page.click("[data-mode=text]")
+def test_invalid_text_shows_friendly_error(page: Page):
+    page.fill("#problem", "A: r\nA: s")
     page.click("#run")
-    expect(page.locator(".alert-error")).to_contain_text("API key")
-    page.select_option("#provider", "offline")
+    expect(page.locator(".alert-error")).to_contain_text("aparece dos veces")
+    _wait_idle(page)
+
+
+def test_stress_1000_nodes_in_the_browser(page: Page):
+    page.click("[data-n='1000']")
+    _wait_idle(page)
+    expect(_metric(page, "tasks")).to_have_text("1000")
+    expect(page.locator("[data-layout=force]")).to_be_disabled()
+    expect(page.locator("[data-layout=batches]")).to_have_attribute("aria-selected", "true")
+    _shot(page, "05-estres-1000")
     assert not page.errors

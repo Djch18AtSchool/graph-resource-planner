@@ -1,16 +1,17 @@
-// Paneles de resultados. Todo texto que viene del LLM o del usuario se inserta con textContent;
-// el reporte Markdown se convierte con marked y se SANITIZA con DOMPurify antes de insertarlo.
+// Paneles de resultados. Todo texto del usuario se inserta con textContent (nunca innerHTML).
 import { batchColor } from "./graph-view.js";
 
-// Solo el subconjunto de HTML que produce Markdown. Sin enlaces, imágenes ni formularios: el reporte
-// lo redacta un LLM y una inyección de prompt podría intentar dibujar un "formulario de API key".
-const REPORT_SANITIZE = {
-  ALLOWED_TAGS: ["h1", "h2", "h3", "h4", "p", "ul", "ol", "li", "strong", "em", "code", "pre", "blockquote",
-    "br", "hr", "table", "thead", "tbody", "tr", "th", "td", "del"],
-  ALLOWED_ATTR: [],
+const GANTT_MAX_TASKS = 80;
+const CHIPS_PER_BATCH = 40;
+const LEGEND_MAX_BATCHES = 12;
+const LONG_METRIC_CHARS = 9;
+const NAMES = { dsatur: "DSatur", welsh_powell: "Welsh-Powell" };
+const STAGES = {
+  conflict_graph: "Construir el grafo de conflictos", coloring: "Coloración (algoritmo elegido)",
+  alternative: "Coloración (el otro algoritmo)", bounds: "Cotas de χ(G) y χ exacto (branch & bound)",
 };
 
-/** Crea un elemento con clase y texto (sin innerHTML). */
+/** Crea un elemento con clase y texto. */
 export function el(tag, className = "", text = "") {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -18,76 +19,124 @@ export function el(tag, className = "", text = "") {
   return node;
 }
 
-const STAGES = {
-  coloring: "Coloración (algoritmo elegido)", coloring_welsh_powell: "Welsh-Powell (comparación)",
-  chromatic_bounds: "Cotas de χ(G) + χ exacto (B&B)", planarity: "Test de planaridad + Kuratowski",
-  planarization: "Planarización (nodos virtuales)", drawing: "Dibujo plano (Tutte + refinamiento)",
-};
+const fmt = (x) => (Number.isInteger(x) ? String(x) : x.toFixed(2).replace(/\.?0+$/, ""));
+export const algorithmName = (key) => NAMES[key] || key;
 
-function metric(k, v, s = "") {
+function swatch(batch) {
+  const sw = el("span", "sw");
+  sw.style.background = batchColor(batch);
+  return sw;
+}
+
+function metric(key, k, v, s = "") {
   const box = el("div", "metric");
-  box.append(el("div", "k", k), el("div", "v", String(v)));
+  box.dataset.metric = key;
+  box.append(el("div", "k", k), el("div", String(v).length > LONG_METRIC_CHARS ? "v long" : "v", String(v)));
   if (s) box.append(el("div", "s", s));
   return box;
 }
 
+export function chiText(m) {
+  return m.exact !== null ? `χ(G) = ${m.exact}` : `${m.lower} ≤ χ(G) ≤ ${m.upper}`;
+}
+
 export function renderMetrics(container, view) {
-  const f = view.facts;
-  const c = f.chromatic;
-  const p = f.planarity;
-  const chi = c.exact !== null ? `χ(G) = ${c.exact} (exacto)` : `${c.lower} ≤ χ(G) ≤ ${c.upper}`;
+  const m = view.metrics;
+  const optimal = m.exact !== null && m.colors === m.exact;
+  const proven = { clique: "óptimo: la clique iguala a la heurística", branch_and_bound: "exacto (branch & bound)" };
+  const chiSub = proven[m.exact_method] || `cota: clique ≤ χ ≤ mejor heurística · Δ+1 = ${m.greedy_bound}`;
   container.replaceChildren(
-    metric("Componentes", f.nodes, `${f.dependency_edges} dependencias · ${f.conflict_edges} conflictos`),
-    metric("Lotes de ejecución", c.colors_used, chi),
-    metric("Paralelismo máximo", f.max_parallel_tasks, "tareas en el lote más grande"),
-    metric("¿Plano?", p.is_planar ? "Sí" : "No", p.is_planar ? "dibujable sin cruces" : `contiene subdivisión de ${p.witness}`),
-    metric("Nodos virtuales", p.virtual_nodes, p.is_planar ? "no hicieron falta" : `${p.crossings} cruce(s) resueltos`),
+    metric("tasks", "Tareas", m.tasks, `${m.conflicts} conflictos · Δ = ${m.max_degree}`),
+    metric("colors", "Lotes", m.colors, `${algorithmName(view.algorithm)}${optimal ? " · óptimo" : ""}`),
+    metric("chi", "Número cromático", chiText(m), chiSub),
+    metric("alternative", "Comparación", view.alternative.colors, `lotes con ${algorithmName(view.alternative.algorithm)}`),
+    metric("workers", "Ejecutores", m.workers, "tareas en el lote más grande"),
+    metric("makespan", "Tiempo total", fmt(m.makespan), `secuencial ${fmt(m.sequential)} · ${m.speedup}× más rápido`),
   );
 }
 
-export function renderPlan(container, view) {
-  const f = view.facts;
+// ------------------------------------------------------------------------------------- plan
+function gantt(view) {
+  const total = view.metrics.makespan || 1;
+  const batchOf = new Map(view.tasks.map((t) => [t.id, t]));
+  const chart = el("div", "gantt");
+  view.batches.forEach((b) => {
+    const group = el("div", "gantt-batch");
+    const head = el("div", "gantt-head");
+    head.append(swatch(b.index), document.createTextNode(`Lote ${b.index} · t = ${fmt(b.start)} → ${fmt(b.start + b.duration)}`));
+    group.append(head);
+    b.tasks.forEach((id) => {
+      const task = batchOf.get(id);
+      const row = el("div", "gantt-row");
+      const track = el("div", "gantt-track");
+      const bar = el("div", "gantt-bar");
+      bar.style.left = `${(b.start / total) * 100}%`;
+      bar.style.width = `${Math.max((task.duration / total) * 100, 0.8)}%`;
+      bar.style.background = batchColor(b.index);
+      bar.title = `${id}: ${fmt(task.duration)}`;
+      track.append(bar);
+      row.append(el("span", "gantt-name", id), track);
+      group.append(row);
+    });
+    chart.append(group);
+  });
+  return chart;
+}
+
+function batchList(view) {
   const list = el("div", "batches");
-  f.schedule.forEach((slot) => {
+  view.batches.forEach((b) => {
     const row = el("div", "batch");
     const head = el("div", "head");
-    const sw = el("span", "sw");
-    Object.assign(sw.style, { display: "inline-block", width: "12px", height: "12px", borderRadius: "50%", background: batchColor(slot.slot) });
-    const title = el("span", "", `Lote ${slot.slot}`);
-    title.append(el("small", "", `${slot.tasks.length} en paralelo`));
-    head.append(sw, title);
+    const title = el("span", "", `Lote ${b.index}`);
+    title.append(el("small", "", `${b.tasks.length} en paralelo`));
+    head.append(swatch(b.index), title);
     const tags = el("div", "tags");
-    slot.tasks.forEach((t) => tags.append(el("span", "tag", t)));
+    b.tasks.slice(0, CHIPS_PER_BATCH).forEach((t) => tags.append(el("span", "tag", t)));
+    if (b.tasks.length > CHIPS_PER_BATCH) tags.append(el("span", "tag more", `+${b.tasks.length - CHIPS_PER_BATCH} más`));
     row.append(head, tags);
     list.append(row);
   });
-  const parts = [el("p", "hint", "Los lotes se ejecutan en secuencia; dentro de un lote todo corre en paralelo sin conflictos de recursos.")];
-  parts.push(list);
-  if (f.unconstrained.length) {
-    parts.push(el("p", "hint", `Sin restricciones (pueden ir en cualquier lote): ${f.unconstrained.join(", ")}.`));
-  }
-  if (f.forcing_clique.length > 1) {
-    parts.push(el("p", "hint", `Clique que fuerza ${f.forcing_clique.length} lotes (ω(G) ≤ χ(G)): ${f.forcing_clique.join(", ")}.`));
-  }
-  container.replaceChildren(...parts);
+  return list;
 }
 
-export function renderReport(container, view) {
-  if (!view.report) {
-    container.replaceChildren(el("p", "hint", "Reporte desactivado."));
+export function renderPlan(container, view) {
+  const intro = el("p", "hint first",
+    "Los lotes corren uno tras otro; dentro de un lote todas las tareas corren en paralelo sin compartir recursos. "
+    + "Cada lote dura lo que su tarea más larga.");
+  const body = view.tasks.length <= GANTT_MAX_TASKS ? gantt(view) : batchList(view);
+  container.replaceChildren(intro, body);
+}
+
+// --------------------------------------------------------------------------------- recursos
+export function renderResources(container, view) {
+  if (!view.resources.length) {
+    container.replaceChildren(el("p", "hint first", "Este problema solo tiene conflictos declarados (sin recursos)."));
     return;
   }
-  const html = window.DOMPurify.sanitize(window.marked.parse(view.report), REPORT_SANITIZE);
-  const source = view.report_source === "llm" ? `Redactado por el LLM (${view.provider})` : "Plantilla determinista (sin LLM)";
-  const wrap = el("div");
-  wrap.innerHTML = html;                       // sanitizado con DOMPurify
-  container.replaceChildren(el("p", "hint", `${source}. El bloque «Datos verificados» lo genera el código, no el LLM.`), wrap);
+  const table = el("table", "resources");
+  const head = el("tr");
+  head.append(el("th", "", "Recurso"), el("th", "", "Tareas que lo usan"), el("th", "", "Clique"));
+  table.append(head);
+  view.resources.forEach((r) => {
+    const tr = el("tr");
+    tr.append(el("td", "", r.name), el("td", "left", r.tasks.join(", ")), el("td", "", `K${r.tasks.length}`));
+    table.append(tr);
+  });
+  const wrap = el("div", "table-wrap");
+  wrap.append(table);
+  container.replaceChildren(
+    el("p", "hint first", `Las tareas que comparten un recurso se bloquean todas entre sí: forman una clique. `
+      + `Por eso hacen falta al menos tantos lotes como usuarios tenga el recurso más disputado (${view.metrics.max_resource_usage}).`),
+    wrap,
+  );
 }
 
+// ---------------------------------------------------------------------------------- matriz
 export function renderMatrix(container, view) {
-  const m = view.conflict_matrix;
+  const m = view.matrix;
   if (!m) {
-    container.replaceChildren(el("p", "hint", "La matriz se muestra para grafos de hasta 40 vértices."));
+    container.replaceChildren(el("p", "hint first", "La matriz se muestra para grafos de hasta 40 vértices."));
     return;
   }
   const table = el("table");
@@ -106,7 +155,7 @@ export function renderMatrix(container, view) {
   const wrap = el("div", "table-wrap");
   wrap.append(table);
   container.replaceChildren(
-    el("p", "hint", "Grafo de conflictos (el que se colorea). A[i][j] = 1 si las tareas i y j comparten un recurso exclusivo. Espacio O(V²); la lista de adyacencia usa O(V + E)."),
+    el("p", "hint first", "A[i][j] = 1 si las tareas i y j están en conflicto. Ocupa O(V²); los algoritmos recorren la lista de adyacencia, O(V + E)."),
     wrap,
   );
 }
@@ -124,33 +173,36 @@ export function renderTimes(container, view) {
   container.replaceChildren(table);
 }
 
-export function renderLegend(container, view, layout) {
-  const used = [...new Set(view.facts.schedule.map((s) => s.slot))];
-  const items = used.map((b) => {
+export function renderLegend(container, view) {
+  const items = view.batches.slice(0, LEGEND_MAX_BATCHES).map((b) => {
     const span = el("span");
-    const sw = el("span", "sw");
-    sw.style.background = batchColor(b);
-    span.append(sw, document.createTextNode(`Lote ${b}`));
+    span.append(swatch(b.index), document.createTextNode(`Lote ${b.index}`));
     return span;
   });
-  const free = el("span");
-  const sw = el("span", "sw");
-  sw.style.background = batchColor(null);
-  free.append(sw, document.createTextNode("Sin conflictos"));
-  const dep = el("span");
-  dep.append(el("span", "ln"), document.createTextNode("Dependencia (→ depende de)"));
-  const con = el("span");
-  con.append(el("span", "ln conflict"), document.createTextNode("Conflicto de recurso"));
-  items.push(free, dep, con);
-  if (layout === "planar" && view.facts.planarity.virtual_nodes > 0) {
-    const v = el("span");
-    v.append(el("span", "dm"), document.createTextNode("Nodo virtual (cruce)"));
-    items.push(v);
-  }
-  if (!view.facts.planarity.is_planar) {
-    const k = el("span");
-    k.append(el("span", "ln kura"), document.createTextNode(`Certificado ${view.facts.planarity.witness}`));
-    items.push(k);
-  }
+  if (view.batches.length > LEGEND_MAX_BATCHES) items.push(el("span", "", `… ${view.batches.length} lotes`));
+  const shared = el("span");
+  shared.append(el("span", "ln"), document.createTextNode("Comparten recurso"));
+  const declared = el("span");
+  declared.append(el("span", "ln dashed"), document.createTextNode("Conflicto declarado"));
+  items.push(shared, declared);
   container.replaceChildren(...items);
+}
+
+/** Explicación del paso `k` (0..n) del algoritmo. */
+export function stepText(view, k) {
+  const n = view.steps.length;
+  if (k === 0) return "Paso 0: ninguna tarea tiene lote. Presione ▶ para ver al algoritmo trabajar.";
+  if (k === n) {
+    return `Coloración completa: ${view.metrics.colors} lotes. Ninguna arista une dos tareas del mismo lote. `
+      + "Toque un nodo o una arista para ver el detalle.";
+  }
+  const s = view.steps[k - 1];
+  const degree = view.tasks.find((t) => t.id === s.task)?.degree ?? 0;
+  if (view.algorithm === "dsatur") {
+    return `Paso ${k}/${n}: «${s.task}» → lote ${s.batch}. DSatur elige la tarea con mayor saturación `
+      + `(${s.saturation} lote(s) distinto(s) entre sus vecinos ya asignados; empate → mayor grado, aquí ${degree}) `
+      + "y le da el menor lote libre.";
+  }
+  return `Paso ${k}/${n}: «${s.task}» → lote ${s.batch}. Welsh-Powell recorre las tareas por grado decreciente `
+    + `(grado ${degree}) y llena el lote ${s.batch} con toda tarea que no choque con otra ya puesta en él.`;
 }

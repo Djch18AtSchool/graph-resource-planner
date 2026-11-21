@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Planificador por Grafos</title>
-  <meta name="description" content="Motor IA de planificación y orquestación basado en grafos: coloración (lotes paralelos), planaridad (diagramas sin cruces) y un LLM que traduce requerimientos a grafos.">
+  <title>Coloración de Recursos</title>
+  <meta name="description" content="Asignación de recursos por coloración de grafos: DSatur y Welsh-Powell convierten tareas con conflictos en lotes de ejecución paralela.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='8' cy='8' r='5' fill='%234C78A8'/%3E%3Ccircle cx='24' cy='10' r='5' fill='%23F58518'/%3E%3Ccircle cx='14' cy='24' r='5' fill='%2354A24B'/%3E%3Cpath d='M8 8L24 10L14 24Z' fill='none' stroke='%23555' stroke-width='2'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -18,8 +18,8 @@
         <circle cx="8" cy="8" r="5" fill="#4C78A8"/><circle cx="24" cy="10" r="5" fill="#F58518"/><circle cx="14" cy="24" r="5" fill="#54A24B"/>
       </svg>
       <div>
-        <h1>Motor IA de planificación por grafos</h1>
-        <p class="subtitle">Matemática Discreta II · Universidad CENFOTEC · Grupo 2</p>
+        <h1>Asignación de recursos por coloración de grafos</h1>
+        <p class="subtitle">Matemática Discreta II · Universidad CENFOTEC · Grupo 2 · Módulo 2</p>
       </div>
     </div>
     <div class="topbar-right">
@@ -32,76 +32,42 @@
     <!-- ======================================================= panel de entrada -->
     <aside class="panel" aria-label="Configuración">
       <section class="card">
-        <h2>1 · Requerimiento</h2>
-        <div class="segmented" role="tablist" aria-label="Tipo de entrada">
-          <button type="button" role="tab" data-mode="text" aria-selected="true">Texto</button>
-          <button type="button" role="tab" data-mode="example" aria-selected="false">Ejemplo</button>
-          <button type="button" role="tab" data-mode="json" aria-selected="false">JSON</button>
-        </div>
-
-        <div class="mode-pane" data-pane="text">
-          <label for="text" class="sr-only">Describa el sistema</label>
-          <textarea id="text" rows="6" spellcheck="true">Crea una arquitectura de microservicios para un e-commerce con procesamiento de pagos, inventario y notificaciones en tiempo real. Hay jobs nocturnos de respaldo y de reportes que comparten las bases de datos.</textarea>
-          <div class="chips" aria-label="Ideas de requerimientos">
-            <button type="button" class="chip" data-prompt="Crea una arquitectura de microservicios para un e-commerce con procesamiento de pagos, inventario y notificaciones en tiempo real. Hay jobs nocturnos de respaldo y de reportes que comparten las bases de datos.">E-commerce</button>
-            <button type="button" class="chip" data-prompt="Pipeline de datos diario: ingesta de ventas y de logs web hacia un data warehouse, limpieza, enriquecimiento geográfico, entrenamiento de un modelo en la única GPU y un dashboard con reporte exportable.">Pipeline ETL</button>
-            <button type="button" class="chip" data-prompt="Plataforma de machine learning con tres entrenadores que pueden usar cualquiera de tres GPUs, un feature store compartido y checkpoints en el mismo disco.">Plataforma ML</button>
-            <button type="button" class="chip" data-prompt="Sistema universitario de matrícula: portal web, autenticación, servicio de cursos, servicio de pagos, generación de horarios, notificaciones por correo y un job de cierre de período que bloquea la base de datos de matrícula.">Matrícula</button>
-          </div>
-          <p class="hint" id="offline-hint">En modo <strong>offline</strong> se elige el ejemplo más parecido por palabras clave. Para interpretar cualquier texto, use Claude u Ollama.</p>
-        </div>
-
-        <div class="mode-pane" data-pane="example" hidden>
-          <label for="example">Ejemplo incluido</label>
-          <select id="example"></select>
-        </div>
-
-        <div class="mode-pane" data-pane="json" hidden>
-          <label for="spec-json">GraphSpec (nodos y aristas <code>dependency</code> / <code>conflict</code>)</label>
-          <textarea id="spec-json" rows="10" class="mono" spellcheck="false"></textarea>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>2 · Agente LLM</h2>
-        <label for="provider">Proveedor</label>
-        <select id="provider">
-          <option value="offline">Offline (sin red, ejemplos incluidos)</option>
-          <option value="anthropic">Claude (Anthropic API)</option>
-          <option value="ollama">Ollama (modelo local)</option>
-        </select>
-
-        <div class="provider-pane" data-provider="anthropic" hidden>
-          <label for="api-key">API key de Anthropic</label>
-          <input id="api-key" type="password" autocomplete="off" placeholder="sk-ant-…" spellcheck="false">
-          <label class="check"><input id="remember-key" type="checkbox"> Recordar en esta pestaña</label>
-          <div class="row2">
-            <div><label for="model">Modelo</label><input id="model" value="claude-opus-5-5" spellcheck="false"></div>
-            <div><label for="effort">Esfuerzo</label>
-              <select id="effort"><option value="low">bajo</option><option value="medium" selected>medio</option><option value="high">alto</option></select>
-            </div>
-          </div>
-          <p class="hint">La key se usa solo desde su navegador hacia <code>api.anthropic.com</code>; no se guarda en el repositorio ni en ningún servidor. Use una key con límite de gasto.</p>
-        </div>
-
-        <div class="provider-pane" data-provider="ollama" hidden>
-          <div class="row2">
-            <div><label for="ollama-host">Host</label><input id="ollama-host" value="http://localhost:11434" spellcheck="false"></div>
-            <div><label for="ollama-model">Modelo</label><input id="ollama-model" value="llama3.1" spellcheck="false"></div>
-          </div>
-          <p class="hint">Inicie Ollama permitiendo este origen: <code id="ollama-cmd">OLLAMA_ORIGINS=… ollama serve</code></p>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>3 · Algoritmos</h2>
-        <label for="algorithm">Coloración (asignación de lotes)</label>
+        <h2>1 · Tareas y recursos</h2>
+        <label for="example">Cargar ejemplo</label>
+        <select id="example" disabled></select>
+        <label for="problem">Una tarea por línea</label>
+        <textarea id="problem" rows="14" class="mono" spellcheck="false" wrap="off"></textarea>
+        <details class="format">
+          <summary>Formato</summary>
+          <pre class="mono">titulo: Mi sistema
+Tarea [duración]: recurso1, recurso2
+Tarea sin recursos
+Tarea A -- Tarea B   (conflicto directo)
+# comentario (línea completa)</pre>
+          <p class="hint">Cada recurso es exclusivo: dos tareas que lo usan no pueden correr a la vez. La duración es opcional (1 por defecto).</p>
+        </details>
+        <label for="algorithm">Algoritmo de coloración</label>
         <select id="algorithm">
           <option value="dsatur">DSatur (Brélaz, 1979)</option>
           <option value="welsh_powell">Welsh-Powell (1967)</option>
         </select>
-        <label class="check"><input id="with-report" type="checkbox" checked> Generar reporte técnico</label>
-        <button id="run" class="primary" type="button" disabled>Analizar</button>
+        <button id="run" class="primary" type="button" disabled>Asignar lotes</button>
+      </section>
+
+      <section class="card">
+        <h2>2 · Prueba de estrés</h2>
+        <p class="hint first">Grafo de conflictos aleatorio G(n, p): cada par de tareas choca con probabilidad p.</p>
+        <div class="chips" aria-label="Tamaños de prueba">
+          <button type="button" class="chip" data-n="10" data-p="0.3" disabled>10 nodos</button>
+          <button type="button" class="chip" data-n="100" data-p="0.05" disabled>100 nodos</button>
+          <button type="button" class="chip" data-n="1000" data-p="0.005" disabled>1000 nodos</button>
+        </div>
+        <div class="row3">
+          <div><label for="rand-n">n</label><input id="rand-n" type="number" min="1" max="2000" value="100"></div>
+          <div><label for="rand-p">p</label><input id="rand-p" type="number" min="0" max="1" step="0.001" value="0.05"></div>
+          <div><label for="rand-seed">semilla</label><input id="rand-seed" type="number" min="0" value="1"></div>
+        </div>
+        <button id="run-random" class="secondary" type="button" disabled>Generar y colorear</button>
       </section>
     </aside>
 
@@ -112,10 +78,9 @@
       <div id="empty" class="card empty">
         <h2>¿Cómo funciona?</h2>
         <ol class="steps">
-          <li><strong>LLM → JSON.</strong> El agente convierte el requerimiento en un grafo de recursos validado (nodos + dependencias + conflictos).</li>
-          <li><strong>Coloración.</strong> DSatur / Welsh-Powell colorean el grafo de conflictos: cada color es un lote que corre en paralelo sin colisiones; χ(G) es el mínimo de lotes.</li>
-          <li><strong>Planaridad.</strong> Test de Boyer-Myrvold / LR. Si no es plano se extrae el certificado de Kuratowski (K₅ / K₃,₃) y se planariza con nodos virtuales.</li>
-          <li><strong>Reporte.</strong> El LLM interpreta las métricas (no las calcula) y recomienda la infraestructura mínima.</li>
+          <li><strong>Grafo de conflictos.</strong> Cada vértice es una tarea; una arista une dos tareas que comparten un recurso exclusivo.</li>
+          <li><strong>Coloración.</strong> DSatur o Welsh-Powell asignan un color a cada vértice sin que dos vecinos lo repitan.</li>
+          <li><strong>Lotes.</strong> Cada color es un lote: sus tareas corren en paralelo sin colisiones y los lotes van uno tras otro. El mínimo posible de lotes es χ(G).</li>
         </ol>
         <p class="hint">Todo el cálculo corre en su navegador con el mismo código Python del repositorio (Pyodide / WebAssembly).</p>
       </div>
@@ -125,35 +90,36 @@
 
         <div class="card graph-card">
           <div class="toolbar">
-            <div class="segmented small" role="tablist" aria-label="Dibujo">
-              <button type="button" role="tab" data-layout="planar" aria-selected="true">Plano (Tutte)</button>
-              <button type="button" role="tab" data-layout="spring" aria-selected="false">Fuerzas</button>
+            <div class="segmented small" role="tablist" aria-label="Disposición del grafo">
+              <button type="button" role="tab" data-layout="force" aria-selected="true">Fuerzas</button>
+              <button type="button" role="tab" data-layout="batches" aria-selected="false">Por lotes</button>
             </div>
-            <label class="check inline" id="kura-wrap" hidden><input id="kura" type="checkbox"> Resaltar <span id="kura-kind">Kuratowski</span></label>
+            <label class="check inline"><input id="clique" type="checkbox"> Resaltar clique (cota inferior)</label>
             <span class="spacer"></span>
-            <span id="crossings" class="badge"></span>
             <button id="fit" class="ghost" type="button">Ajustar</button>
             <button id="png" class="ghost" type="button">PNG</button>
           </div>
-          <div id="cy" role="img" aria-label="Diagrama del grafo de recursos"></div>
+          <div class="stepper" aria-label="Algoritmo paso a paso">
+            <button id="step-first" class="ghost" type="button" aria-label="Volver al inicio" title="Volver al inicio">↺</button>
+            <button id="step-play" class="ghost" type="button" aria-label="Reproducir" title="Reproducir">▶</button>
+            <input id="step" type="range" min="0" max="0" value="0" aria-label="Paso del algoritmo">
+            <span id="step-label" class="badge">Paso 0/0</span>
+          </div>
+          <div id="cy" role="img" aria-label="Grafo de conflictos coloreado por lotes"></div>
+          <p id="no-draw" class="hint" hidden>El grafo tiene demasiadas aristas para dibujarlo con fluidez; vea los lotes y métricas.</p>
           <div class="legend" id="legend"></div>
-          <div class="inspector" id="inspector">Toque un nodo o una arista para ver el detalle.</div>
+          <div class="inspector" id="inspector"></div>
         </div>
 
         <div class="card">
           <div class="tabs" role="tablist" aria-label="Detalle">
-            <button type="button" role="tab" data-tab="plan" aria-selected="true">Plan de ejecución</button>
-            <button type="button" role="tab" data-tab="report" aria-selected="false">Reporte técnico</button>
-            <button type="button" role="tab" data-tab="json" aria-selected="false">JSON del LLM</button>
+            <button type="button" role="tab" data-tab="plan" aria-selected="true">Plan por lotes</button>
+            <button type="button" role="tab" data-tab="resources" aria-selected="false">Recursos</button>
             <button type="button" role="tab" data-tab="matrix" aria-selected="false">Matriz de adyacencia</button>
             <button type="button" role="tab" data-tab="times" aria-selected="false">Tiempos</button>
           </div>
           <div class="tab-pane" data-tabpane="plan" id="plan"></div>
-          <div class="tab-pane markdown" data-tabpane="report" id="report" hidden></div>
-          <div class="tab-pane" data-tabpane="json" hidden>
-            <div class="toolbar"><span class="hint" id="json-meta"></span><span class="spacer"></span><button id="copy-json" class="ghost" type="button">Copiar</button><button id="edit-json" class="ghost" type="button">Editar como JSON</button></div>
-            <pre id="json" class="mono"></pre>
-          </div>
+          <div class="tab-pane" data-tabpane="resources" id="resources" hidden></div>
           <div class="tab-pane" data-tabpane="matrix" id="matrix" hidden></div>
           <div class="tab-pane" data-tabpane="times" id="times" hidden></div>
         </div>
@@ -162,13 +128,11 @@
   </main>
 
   <footer class="footer">
-    <span>graph_core · ai_agent · visualization — Python en el navegador con Pyodide</span>
+    <span>graph_core · visualization — Python en el navegador con Pyodide</span>
     <span id="build-version"></span>
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.34.4/cytoscape.min.js" integrity="sha384-lyd1lDWZ623YSUJ/wMQH50y+T81dWKJk7ZoFdYWXQS83b0+QpW0pgdfXEnQnXL/X" crossorigin="anonymous"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/18.1.3/lib/marked.umd.min.js" integrity="sha384-lFrK5CitYysybAqlfGWzSr4wxMI/Ok44hlfKtPAFt1q6F4xSK/6mTiKDfcw/GZO5" crossorigin="anonymous"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.17/purify.min.js" integrity="sha384-P0JNneQf81HOl9VwNXK76cQ9VMD6Nfsnepxb0cCOg8+UzEdzgPHAPV4wVQrvYQSx" crossorigin="anonymous"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

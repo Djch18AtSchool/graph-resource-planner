@@ -3,12 +3,12 @@ Pruebas de estres: grafos de 10, 100 y 1000 nodos.
 
     python main.py stress                      # o:  python -m benchmarks.stress
     python main.py stress --quick              # solo 10 y 100 nodos
-    python main.py stress --sizes 10 100 1000 --planarize-limit 30 --out results
+    python main.py stress --sizes 10 100 1000 --out results
 
 Produce en ``--out`` (por defecto ``results/``):
-    stress_results.csv / .json    una fila por (familia, n) con tiempos, memoria y calidad
+    stress_results.csv / .json    una fila por (familia, n): tiempos, colores y cotas de chi(G)
     stress_representations.csv    lista vs matriz: memoria y tiempo al crecer V (grafo disperso)
-    stress_times.png, stress_ops.png, stress_memory.png    figuras para el informe
+    stress_times.png, stress_colors.png, stress_ops.png, stress_memory.png    figuras para el informe
 """
 from __future__ import annotations
 
@@ -21,10 +21,9 @@ import tracemalloc
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from graph_core import Graph, check_planarity, dsatur, planarize, welsh_powell
+from graph_core import Graph, clique_lower_bound, dsatur, exact_chromatic_number, welsh_powell
 from graph_core.coloring import is_valid_coloring
-
-from .generators import FAMILIES
+from graph_core.generators import FAMILIES, random_edges
 
 
 def timeit(fn: Callable, *a, repeat: int = 1, **kw):
@@ -48,7 +47,7 @@ def bench_operations(g: Graph, queries: int = 100_000, seed: int = 0) -> Dict[st
     return res
 
 
-def bench_one(family: str, n: int, planarize_limit: float, seed: int = 1) -> Dict[str, object]:
+def bench_one(family: str, n: int, seed: int = 1) -> Dict[str, object]:
     edges = FAMILIES[family](n, seed)
     row: Dict[str, object] = {"family": family, "n": n}
 
@@ -57,7 +56,7 @@ def bench_one(family: str, n: int, planarize_limit: float, seed: int = 1) -> Dic
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     row.update(V=g.num_vertices, E=g.num_edges, density=round(g.density(), 5),
-               build_s=t_build, build_peak_mb=peak / 1e6)
+               max_degree=max(g.degrees().values(), default=0), build_s=t_build, build_peak_mb=peak / 1e6)
     row.update(bench_operations(g))
 
     for name, algo in (("dsatur", dsatur), ("welsh_powell", welsh_powell)):
@@ -65,19 +64,17 @@ def bench_one(family: str, n: int, planarize_limit: float, seed: int = 1) -> Dic
         assert r.valid and is_valid_coloring(g, r.colors)
         row[f"{name}_s"], row[f"{name}_colors"] = t, r.num_colors
 
-    t, pl = timeit(check_planarity, g)
-    row.update(planarity_s=t, is_planar=pl.is_planar, witness=pl.witness_kind or "",
-               euler_exceeded=pl.euler_bound_exceeded)
-
-    t, res = timeit(planarize, g, time_limit=planarize_limit)
-    row.update(planarize_s=t, crossings=res.num_crossings, unrouted=len(res.unrouted_edges),
-               planarize_completed=not res.unrouted_edges)
+    row["clique_lower"] = clique_lower_bound(g)
+    t, exact = timeit(exact_chromatic_number, g)
+    best = min(row["dsatur_colors"], row["welsh_powell_colors"])
+    if exact is None and row["clique_lower"] == best:      # la clique demuestra que la heuristica es optima
+        exact = best
+    row.update(exact_s=t, exact_chi="" if exact is None else exact)
     return row
 
 
 def bench_representations(sizes=(100, 500, 1000, 2000, 3000), seed: int = 2) -> List[Dict[str, float]]:
     """Memoria y tiempo de construir SOLO la lista o SOLO la matriz para un grafo disperso (E = 3V)."""
-    from .generators import random_edges
     out = []
     for V in sizes:
         edges = random_edges(V, 3 * V, seed)
@@ -123,10 +120,9 @@ def _plots(out: Path, rows, rep_rows) -> None:
     sizes = sorted({r["n"] for r in rows})
     fams = list(dict.fromkeys(r["family"] for r in rows))
 
-    # 1) tiempos de coloracion y planaridad
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2))
-    for ax, key, title in ((axes[0], "dsatur_s", "DSatur"), (axes[1], "welsh_powell_s", "Welsh-Powell"),
-                           (axes[2], "planarity_s", "Test de planaridad")):
+    # 1) tiempos de coloracion
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
+    for ax, key, title in ((axes[0], "dsatur_s", "DSatur"), (axes[1], "welsh_powell_s", "Welsh-Powell")):
         for fam in fams:
             ys = [next(r[key] for r in rows if r["family"] == fam and r["n"] == n) * 1000 for n in sizes]
             ax.plot(sizes, ys, marker="o", label=fam)
@@ -135,7 +131,19 @@ def _plots(out: Path, rows, rep_rows) -> None:
     axes[0].legend(fontsize=7)
     fig.tight_layout(); fig.savefig(out / "stress_times.png", dpi=150); plt.close(fig)
 
-    # 2) lista vs matriz en operaciones (grafo disperso mas grande)
+    # 2) colores usados por cada algoritmo frente a la cota inferior (n mas grande)
+    n = max(sizes)
+    big = [next(r for r in rows if r["family"] == fam and r["n"] == n) for fam in fams]
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+    xs = range(len(fams))
+    ax.bar([x - 0.27 for x in xs], [r["clique_lower"] for r in big], 0.27, label="cota inferior (clique)")
+    ax.bar(list(xs), [r["dsatur_colors"] for r in big], 0.27, label="DSatur")
+    ax.bar([x + 0.27 for x in xs], [r["welsh_powell_colors"] for r in big], 0.27, label="Welsh-Powell")
+    ax.set_xticks(list(xs)); ax.set_xticklabels(fams, fontsize=8, rotation=12)
+    ax.set_ylabel("colores (lotes)"); ax.set_title(f"Lotes usados, n = {n}"); ax.legend(); ax.grid(alpha=.3, axis="y")
+    fig.tight_layout(); fig.savefig(out / "stress_colors.png", dpi=150); plt.close(fig)
+
+    # 3) lista vs matriz en operaciones (grafo disperso mas grande)
     fam = "aleatorio disperso"
     fig, ax = plt.subplots(figsize=(7, 4.2))
     ops = [("has_edge", "has_edge ×100k"), ("neighbors_all", "neighbors (todos)"), ("degrees_all", "grados (todos)")]
@@ -148,7 +156,7 @@ def _plots(out: Path, rows, rep_rows) -> None:
     ax.set_ylabel("ms"); ax.set_title(f"Lista vs matriz, V={n}, E={r['E']}"); ax.legend(); ax.grid(alpha=.3, axis="y")
     fig.tight_layout(); fig.savefig(out / "stress_ops.png", dpi=150); plt.close(fig)
 
-    # 3) memoria lista vs matriz
+    # 4) memoria lista vs matriz
     fig, ax = plt.subplots(figsize=(7, 4.2))
     ax.plot([r["V"] for r in rep_rows], [r["list_mb"] for r in rep_rows], marker="o", label="lista O(V+E)")
     ax.plot([r["V"] for r in rep_rows], [r["matrix_mb"] for r in rep_rows], marker="s", label="matriz O(V²)")
@@ -161,7 +169,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="stress", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sizes", type=int, nargs="+", default=[10, 100, 1000])
     ap.add_argument("--quick", action="store_true", help="solo 10 y 100 nodos")
-    ap.add_argument("--planarize-limit", type=float, default=30.0, help="segundos maximos por planarizacion")
     ap.add_argument("--out", default="results")
     ap.add_argument("--no-plots", action="store_true")
     args = ap.parse_args(argv)
@@ -170,16 +177,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
 
     rows = []
-    hdr = f"{'familia':24s}{'n':>6s}{'E':>8s}{'DSatur':>10s}{'cols':>5s}{'W-P':>10s}{'cols':>5s}{'planar?':>9s}{'plan.ms':>9s}{'cruces':>8s}{'planarizar':>12s}"
-    print(hdr)
+    print(f"{'familia':24s}{'n':>6s}{'E':>8s}{'Δ':>5s}{'DSatur ms':>11s}{'cols':>5s}{'W-P ms':>9s}{'cols':>5s}"
+          f"{'clique':>8s}{'χ(G)':>8s}")
     for n in sizes:
         for fam in FAMILIES:
-            r = bench_one(fam, n, args.planarize_limit)
+            r = bench_one(fam, n)
             rows.append(r)
-            note = "" if r["planarize_completed"] else f" (limite; {r['unrouted']} sin enrutar)"
-            print(f"{fam:24s}{n:6d}{r['E']:8d}{r['dsatur_s'] * 1000:9.2f}m{r['dsatur_colors']:5d}"
-                  f"{r['welsh_powell_s'] * 1000:9.2f}m{r['welsh_powell_colors']:5d}{str(r['is_planar']):>9s}"
-                  f"{r['planarity_s'] * 1000:9.1f}{r['crossings']:8d}{r['planarize_s']:11.2f}s{note}", flush=True)
+            print(f"{fam:24s}{n:6d}{r['E']:8d}{r['max_degree']:5d}{r['dsatur_s'] * 1000:11.2f}{r['dsatur_colors']:5d}"
+                  f"{r['welsh_powell_s'] * 1000:9.2f}{r['welsh_powell_colors']:5d}{r['clique_lower']:8d}"
+                  f"{str(r['exact_chi'] or '-'):>8s}", flush=True)
     rep_rows = bench_representations()
     _write_csv(out / "stress_results.csv", rows)
     _write_csv(out / "stress_representations.csv", rep_rows)

@@ -1,18 +1,13 @@
 [project]
 name = "graph-resource-planner"
 version = "1.0.0"
-description = "Motor IA de planificacion y orquestacion basado en grafos (coloracion + planaridad + LLM)"
+description = "Asignacion de recursos por coloracion de grafos (DSatur y Welsh-Powell)"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Grupo 2 - Matematica Discreta II (CENFOTEC, C3-2026)" }]
 dependencies = [
     "networkx>=3.4",
-    "numpy>=2.0",
-    "pydantic>=2.10",
     "matplotlib>=3.8",
-    "anthropic>=2.12",
-    "httpx>=0.27",
-    "python-dotenv>=1.0",
 ]
 
 [dependency-groups]
@@ -34,7 +29,7 @@ addopts = "-q -m 'not e2e'"
 markers = ["e2e: pruebas end-to-end en navegador (uv run --group e2e pytest -m e2e)"]
 
 [tool.coverage.run]
-source = ["graph_core", "ai_agent", "visualization", "pipeline"]
+source = ["graph_core", "visualization", "benchmarks", "scripts"]
 omit = ["visualization/web/*"]
 
 [tool.coverage.report]

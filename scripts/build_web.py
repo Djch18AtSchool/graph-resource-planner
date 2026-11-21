@@ -5,7 +5,7 @@ Construye el sitio estatico (GitHub Pages) de la app web.
     uv run python -m scripts.build_web --serve    # construye y sirve en http://localhost:8000
 
 El sitio = archivos de ``visualization/web/`` + ``py/bundle.zip`` con el MISMO codigo Python del
-repositorio (graph_core, ai_agent, pipeline y la parte web de visualization), que Pyodide descomprime
+repositorio (graph_core, los ejemplos y la parte web de visualization), que Pyodide descomprime
 y ejecuta en el navegador. No hay una "copia" del algoritmo en JavaScript: es un unico codigo fuente.
 """
 from __future__ import annotations
@@ -22,18 +22,21 @@ from typing import Iterable, List
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB_SRC = ROOT / "visualization" / "web"
-PY_PACKAGES = ("graph_core", "ai_agent")
-PY_FILES = ("pipeline.py", "visualization/__init__.py", "visualization/view_model.py",
+PY_PACKAGES = ("graph_core",)
+PY_FILES = ("visualization/__init__.py", "visualization/examples.py", "visualization/view_model.py",
             "visualization/web_api.py")
+DATA_GLOBS = ("examples/*.txt",)
 DEFAULT_PORT = 8000
 
 
 def python_sources(root: Path = ROOT) -> List[Path]:
-    """Archivos .py que necesita el navegador (sin pruebas, CLI ni graficos de matplotlib)."""
+    """Archivos que necesita el navegador: .py (sin pruebas, CLI ni matplotlib) y los ejemplos .txt."""
     files: List[Path] = []
     for pkg in PY_PACKAGES:
         files += sorted((root / pkg).rglob("*.py"))
     files += [root / f for f in PY_FILES]
+    for pattern in DATA_GLOBS:
+        files += sorted(root.glob(pattern))
     return [f for f in files if "__pycache__" not in f.parts]
 
 

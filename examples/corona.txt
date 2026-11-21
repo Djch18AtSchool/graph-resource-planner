@@ -1,0 +1,33 @@
+titulo: Caso difícil para Welsh-Powell (grafo corona)
+# Cada A_i choca con todos los B_j salvo B_i. Es bipartito (chi = 2) y todos los grados son iguales:
+# Welsh-Powell, con este orden, usa 5 lotes; DSatur encuentra 2.
+A1
+B1
+A2
+B2
+A3
+B3
+A4
+B4
+A5
+B5
+A1 -- B2
+A1 -- B3
+A1 -- B4
+A1 -- B5
+A2 -- B1
+A2 -- B3
+A2 -- B4
+A2 -- B5
+A3 -- B1
+A3 -- B2
+A3 -- B4
+A3 -- B5
+A4 -- B1
+A4 -- B2
+A4 -- B3
+A4 -- B5
+A5 -- B1
+A5 -- B2
+A5 -- B3
+A5 -- B4

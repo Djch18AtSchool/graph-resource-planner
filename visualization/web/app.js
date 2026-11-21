@@ -1,20 +1,20 @@
 // Controlador de la interfaz: lee el formulario, habla con el Web Worker (Python) y pinta resultados.
-import { GraphView } from "./graph-view.js";
-import { el, renderLegend, renderMatrix, renderMetrics, renderPlan, renderReport, renderTimes } from "./panels.js";
+import { FORCE_MAX_NODES, GraphView } from "./graph-view.js";
+import { el, renderLegend, renderMatrix, renderMetrics, renderPlan, renderResources, renderTimes, stepText } from "./panels.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
-const KEY_STORAGE = "grp.anthropicKey";
 const THEME_STORAGE = "grp.theme";
+const PLAY_TOTAL_MS = 9000;                 // la animación completa dura ~9 s
+const PLAY_MIN_MS = 25;
+const PLAY_MAX_MS = 700;
 
-const state = { mode: "text", layout: "planar", view: null, meta: null };
+const state = { layout: "force", view: null, meta: null, busy: false, timer: null };
 
-// --------------------------------------------------------------------------- almacenamiento
-// sessionStorage puede no existir (modo privado, iframes): toda lectura/escritura va protegida.
+// localStorage puede no existir (modo privado, iframes): toda lectura/escritura va protegida.
 const store = {
-  get(area, key) { try { return window[area].getItem(key); } catch { return null; } },
-  set(area, key, value) { try { window[area].setItem(key, value); } catch { /* no disponible */ } },
-  del(area, key) { try { window[area].removeItem(key); } catch { /* no disponible */ } },
+  get(key) { try { return window.localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { window.localStorage.setItem(key, value); } catch { /* no disponible */ } },
 };
 
 // ------------------------------------------------------------------------------- worker
@@ -56,137 +56,153 @@ function selectTab(groupAttr, value, paneAttr) {
   if (paneAttr) $$(`[${paneAttr}]`).forEach((p) => { p.hidden = p.getAttribute(paneAttr) !== value; });
 }
 
-const graph = new GraphView($("#cy"), (text) => { $("#inspector").textContent = text; });
+const inspect = (text) => { $("#inspector").textContent = text; };
+const graph = new GraphView($("#cy"), inspect);
 
-// ----------------------------------------------------------------------------- formulario
-function readRequest() {
-  const provider = $("#provider").value;
-  const request = {
-    mode: state.mode, provider, algorithm: $("#algorithm").value, with_report: $("#with-report").checked,
-    text: $("#text").value, example: $("#example").value, spec_json: $("#spec-json").value,
-  };
-  const secrets = {};
-  if (provider === "anthropic") {
-    Object.assign(request, { model: $("#model").value.trim(), effort: $("#effort").value });
-    secrets.apiKey = $("#api-key").value.trim();
-  } else if (provider === "ollama") {
-    request.model = $("#ollama-model").value.trim();
-    secrets.ollamaHost = $("#ollama-host").value.trim();
-  }
-  return { request, secrets };
+// ----------------------------------------------------------------------------- análisis
+function setBusy(busy) {
+  state.busy = busy;
+  ["#run", "#run-random", "#example"].forEach((sel) => { $(sel).disabled = busy; });
+  $$("[data-n]").forEach((chip) => { chip.disabled = busy; });
+  $("#run").textContent = busy ? "Calculando…" : "Asignar lotes";
 }
 
-function validate({ request, secrets }) {
-  if (request.mode === "text" && !request.text.trim()) return "Escriba un requerimiento.";
-  if (request.mode === "text" && request.text.length > state.meta.max_input_chars) {
-    return `El requerimiento excede ${state.meta.max_input_chars} caracteres.`;
-  }
-  if (request.mode === "json" && !request.spec_json.trim()) return "Pegue un GraphSpec en JSON.";
-  if (request.provider === "anthropic" && !secrets.apiKey) return "Ingrese su API key de Anthropic (o use el modo offline).";
-  return null;
-}
-
-async function analyze() {
-  if ($("#run").disabled || !state.meta) return;   // Python cargando o un análisis en curso
+async function analyze(request) {
+  if (state.busy || !state.meta) return;            // Python cargando o un análisis en curso
   $("#alerts").replaceChildren();
-  const input = readRequest();
-  const problem = validate(input);
-  if (problem) { alertBox(problem, "error"); return; }
-  if (input.request.provider === "anthropic" && $("#remember-key").checked) {
-    store.set("sessionStorage", KEY_STORAGE, input.secrets.apiKey);
-  }
-  const button = $("#run");
-  button.disabled = true;
-  button.textContent = input.request.provider === "offline" ? "Analizando…" : "Consultando al LLM…";
-  setStatus("Analizando…", "loading");
+  setBusy(true);
+  setStatus("Calculando…", "loading");
   try {
-    const { result } = await call("analyze", input);
-    if (!result.ok) { alertBox(result.error, "error"); setStatus("Listo", "ready"); return; }
-    result.view.warnings.forEach((w) => alertBox(w, "warn"));
-    showView(result.view);
+    const { result } = await call("analyze", { request: { ...request, algorithm: $("#algorithm").value } });
+    if (result.ok) await showView(result.view); else alertBox(result.error, "error");
     setStatus("Listo", "ready");
   } catch (err) {
     alertBox(err.message, "error");
     setStatus("Error", "error");
   } finally {
-    button.disabled = false;
-    button.textContent = "Analizar";
+    setBusy(false);
   }
 }
 
+function analyzeText() {
+  if (state.busy || !state.meta) return;            // Python cargando o un análisis en curso
+  const text = $("#problem").value;
+  if (!text.trim()) { alertBox("Escriba al menos una tarea.", "error"); return; }
+  if (text.length > state.meta.limits.max_text_chars) {
+    alertBox(`El texto excede ${state.meta.limits.max_text_chars} caracteres.`, "error");
+    return;
+  }
+  analyze({ mode: "text", text });
+}
+
+function analyzeRandom() {
+  if (state.busy || !state.meta) return;
+  const n = Number($("#rand-n").value);
+  const p = Number($("#rand-p").value);
+  const seed = Number($("#rand-seed").value || 0);
+  if (!Number.isInteger(n) || n < 1 || n > state.meta.limits.max_tasks) {
+    alertBox(`n debe ser un entero entre 1 y ${state.meta.limits.max_tasks}.`, "error");
+    return;
+  }
+  if (!(p >= 0 && p <= 1)) { alertBox("p debe estar entre 0 y 1.", "error"); return; }
+  analyze({ mode: "random", n, p, seed: Number.isInteger(seed) && seed >= 0 ? seed : 0 });
+}
+
 // -------------------------------------------------------------------------------- resultados
-function labeler(view) {
-  const map = new Map(view.spec.nodes.map((n) => [n.id, n.label]));
-  return (id) => map.get(id) || id;
-}
-
-function drawGraph() {
-  const view = state.view;
-  const drawing = view[state.layout];
-  graph.render(drawing, labeler(view));
-  graph.setKuratowski($("#kura").checked);
-  const badge = $("#crossings");
-  badge.textContent = `${drawing.crossings} cruce(s) en el dibujo`;
-  badge.className = `badge ${drawing.crossings === 0 ? "good" : "bad"}`;
-  renderLegend($("#legend"), view, state.layout);
-  $("#inspector").textContent = state.layout === "planar"
-    ? "Dibujo plano: embedding de Tutte + refinamiento por fuerzas que nunca crea cruces."
-    : "Layout de fuerzas (networkx.spring_layout) sobre el grafo original: puede cruzar aristas.";
-}
-
-function showView(view) {
+async function showView(view) {
+  stopPlaying();
   state.view = view;
   $("#empty").hidden = true;
   $("#output").hidden = false;
-  const p = view.facts.planarity;
-  $("#kura-wrap").hidden = p.is_planar;
-  $("#kura-kind").textContent = p.witness ? `${p.witness} (Kuratowski)` : "Kuratowski";
   renderMetrics($("#metrics"), view);
   renderPlan($("#plan"), view);
-  renderReport($("#report"), view);
+  renderResources($("#resources"), view);
   renderMatrix($("#matrix"), view);
   renderTimes($("#times"), view);
-  $("#json").textContent = JSON.stringify(view.spec, null, 2);
-  $("#json-meta").textContent = view.attempts
-    ? `Generado por ${view.provider} en ${view.attempts} intento(s) (validado con Pydantic).`
-    : "Especificación cargada directamente (sin LLM).";
-  drawGraph();
+  renderLegend($("#legend"), view);
+  const tooBigForForce = view.tasks.length > FORCE_MAX_NODES;
+  $("[data-layout=force]").disabled = tooBigForForce;
+  $("[data-layout=force]").title = tooBigForForce ? `Disponible hasta ${FORCE_MAX_NODES} tareas` : "";
+  if (tooBigForForce) setLayout("batches", false);
+  const slider = $("#step");
+  slider.max = String(view.steps.length);
+  slider.value = slider.max;
+  $("#clique").checked = false;
+  await drawGraph();
+}
+
+async function drawGraph() {
+  const view = state.view;
+  $("#no-draw").hidden = view.drawable;
+  $("#cy").hidden = !view.drawable;
+  $(".stepper").hidden = !view.drawable;
+  if (!view.drawable) { graph.clear(); inspect(""); return; }
+  await graph.render(view, state.layout);
+  graph.setClique($("#clique").checked);
+  showStep(Number($("#step").value));
+}
+
+function showStep(k) {
+  const view = state.view;
+  graph.setStep(k);
+  $("#step-label").textContent = `Paso ${k}/${view.steps.length}`;
+  inspect(stepText(view, k));
+}
+
+function setLayout(layout, redraw = true) {
+  state.layout = layout;
+  selectTab("data-layout", layout);
+  if (redraw && state.view) drawGraph();
+}
+
+// --------------------------------------------------------------------------- paso a paso
+function stopPlaying() {
+  if (state.timer) clearInterval(state.timer);
+  state.timer = null;
+  $("#step-play").textContent = "▶";
+  $("#step-play").setAttribute("aria-label", "Reproducir");
+}
+
+function togglePlay() {
+  if (state.timer) { stopPlaying(); return; }
+  const slider = $("#step");
+  const n = Number(slider.max);
+  if (Number(slider.value) >= n) slider.value = "0";
+  const delay = Math.min(PLAY_MAX_MS, Math.max(PLAY_MIN_MS, PLAY_TOTAL_MS / Math.max(n, 1)));
+  $("#step-play").textContent = "⏸";
+  $("#step-play").setAttribute("aria-label", "Pausar");
+  showStep(Number(slider.value));
+  state.timer = setInterval(() => {
+    const k = Number(slider.value) + 1;
+    slider.value = String(k);
+    showStep(k);
+    if (k >= n) stopPlaying();
+  }, delay);
 }
 
 // ------------------------------------------------------------------------------- eventos
 function bindEvents() {
-  $$("[data-mode]").forEach((b) => b.addEventListener("click", () => {
-    state.mode = b.dataset.mode;
-    selectTab("data-mode", state.mode, "data-pane");
-  }));
-  $$("[data-layout]").forEach((b) => b.addEventListener("click", () => {
-    state.layout = b.dataset.layout;
-    selectTab("data-layout", state.layout);
-    if (state.view) drawGraph();
-  }));
+  $$("[data-layout]").forEach((b) => b.addEventListener("click", () => { if (!b.disabled) setLayout(b.dataset.layout); }));
   $$("[data-tab]").forEach((b) => b.addEventListener("click", () => selectTab("data-tab", b.dataset.tab, "data-tabpane")));
-  $$(".chip").forEach((c) => c.addEventListener("click", () => { $("#text").value = c.dataset.prompt; }));
-  $("#provider").addEventListener("change", syncProvider);
-  $("#remember-key").addEventListener("change", (e) => { if (!e.target.checked) store.del("sessionStorage", KEY_STORAGE); });
-  $("#run").addEventListener("click", analyze);
-  $("#text").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) analyze(); });
-  $("#kura").addEventListener("change", (e) => graph.setKuratowski(e.target.checked));
+  $$("[data-n]").forEach((c) => c.addEventListener("click", () => {
+    $("#rand-n").value = c.dataset.n;
+    $("#rand-p").value = c.dataset.p;
+    analyzeRandom();
+  }));
+  $("#example").addEventListener("change", () => {
+    const ex = state.meta.examples.find((e) => e.key === $("#example").value);
+    if (ex) { $("#problem").value = ex.text; analyzeText(); }
+  });
+  $("#run").addEventListener("click", analyzeText);
+  $("#run-random").addEventListener("click", analyzeRandom);
+  $("#problem").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) analyzeText(); });
+  $("#step").addEventListener("input", (e) => { stopPlaying(); showStep(Number(e.target.value)); });
+  $("#step-first").addEventListener("click", () => { stopPlaying(); $("#step").value = "0"; showStep(0); });
+  $("#step-play").addEventListener("click", togglePlay);
+  $("#clique").addEventListener("change", (e) => graph.setClique(e.target.checked));
   $("#fit").addEventListener("click", () => graph.fit());
   $("#png").addEventListener("click", downloadPng);
-  $("#copy-json").addEventListener("click", copyJson);
-  $("#edit-json").addEventListener("click", () => {
-    $("#spec-json").value = $("#json").textContent;
-    state.mode = "json";
-    selectTab("data-mode", "json", "data-pane");
-    $("#spec-json").focus();
-  });
   $("#theme-toggle").addEventListener("click", toggleTheme);
-}
-
-function syncProvider() {
-  const provider = $("#provider").value;
-  $$("[data-provider]").forEach((p) => { p.hidden = p.dataset.provider !== provider; });
-  $("#offline-hint").hidden = provider !== "offline";
 }
 
 function downloadPng() {
@@ -198,34 +214,20 @@ function downloadPng() {
   a.click();
 }
 
-async function copyJson() {
-  try {
-    await navigator.clipboard.writeText($("#json").textContent);
-    $("#copy-json").textContent = "Copiado";
-  } catch {
-    $("#copy-json").textContent = "No se pudo copiar";
-  }
-  setTimeout(() => { $("#copy-json").textContent = "Copiar"; }, 1500);
-}
-
 function toggleTheme() {
   const root = document.documentElement;
   const current = root.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
   const next = current === "dark" ? "light" : "dark";
   root.dataset.theme = next;
-  store.set("localStorage", THEME_STORAGE, next);
+  store.set(THEME_STORAGE, next);
   if (state.view) drawGraph();                     // los colores del grafo salen de las variables CSS
 }
 
 // ---------------------------------------------------------------------------------- inicio
 async function main() {
-  const theme = store.get("localStorage", THEME_STORAGE);
+  const theme = store.get(THEME_STORAGE);
   if (theme) document.documentElement.dataset.theme = theme;
-  const savedKey = store.get("sessionStorage", KEY_STORAGE);
-  if (savedKey) { $("#api-key").value = savedKey; $("#remember-key").checked = true; }
-  $("#ollama-cmd").textContent = `OLLAMA_ORIGINS=${location.origin} ollama serve`;
   bindEvents();
-  syncProvider();
   try {
     const { meta, version } = await call("init");
     state.meta = meta;
@@ -234,10 +236,11 @@ async function main() {
       o.value = e.key;
       return o;
     }));
-    $("#spec-json").value = JSON.stringify(meta.example_specs.pipeline, null, 2);
+    $("#problem").value = meta.examples[0]?.text || "";
     $("#build-version").textContent = `código Python ${version}`;
     setStatus("Python listo", "ready");
-    $("#run").disabled = false;
+    setBusy(false);
+    analyzeText();
   } catch (err) {
     setStatus("No se pudo iniciar Python", "error");
     alertBox(`No se pudo cargar Pyodide: ${err.message}. Revise la conexión y recargue la página.`, "error");

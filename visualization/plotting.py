@@ -1,102 +1,76 @@
 """
-Dibujo del resultado del analisis (matplotlib).
+Dibujo del plan con matplotlib (CLI).
 
-* Color del nodo   = lote de ejecucion (color del grafo de conflictos). Gris = sin restricciones.
-* Linea continua   = dependencia; linea roja discontinua = conflicto de recursos.
-* Rombo hueco      = nodo virtual (cruce que hubo que resolver para que el grafo sea plano).
-* layout="planar"  = posiciones del planar embedding (garantiza 0 cruces en el dibujo).
-* layout="spring"  = layout de fuerzas de networkx sobre la arquitectura original (puede cruzar
-                     aristas); se incluye para MOSTRAR el valor de la planaridad en la demo.
+* Color del nodo = lote de ejecucion (color del grafo de conflictos).
+* layout="spring"  : layout de fuerzas de networkx.
+* layout="batches" : una columna por lote; como cada lote es un conjunto independiente, TODAS las
+                     aristas van entre columnas distintas (se ve que la coloracion es valida).
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import networkx as nx
 from matplotlib import pyplot as plt
 from matplotlib.collections import LineCollection
-from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from graph_core import count_crossings
+from graph_core import ALGORITHM_NAMES, Plan
 
 PALETTE = ["#4C78A8", "#F58518", "#54A24B", "#E45756", "#B279A2", "#72B7B2", "#EECA3B", "#9D755D",
            "#FF9DA6", "#79706E", "#439894", "#D67195"]
-FREE_COLOR = "#D0D3D8"
+LAYOUTS = ("spring", "batches")
+LABELS_MAX_NODES = 60
+Position = Tuple[float, float]
 
 
-def _normalize(pos: Dict[Any, Tuple[float, float]]) -> Dict[Any, Tuple[float, float]]:
-    xs = [p[0] for p in pos.values()] or [0]
-    ys = [p[1] for p in pos.values()] or [0]
-    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
-    dx, dy = (x1 - x0) or 1.0, (y1 - y0) or 1.0
-    return {v: ((x - x0) / dx, (y - y0) / dy) for v, (x, y) in pos.items()}
+def batch_color(color: int) -> str:
+    return PALETTE[color % len(PALETTE)]
 
 
-def draw_analysis(analysis, layout: str = "planar", show_labels: Optional[bool] = None,
-                  figsize: Tuple[float, float] = (11, 7.5)):
-    """Devuelve ``(figura, cruces)``; ``cruces`` es el numero de pares de aristas que se cruzan en el dibujo."""
-    if layout == "spring":
-        G = analysis.architecture_graph
-        nxg = G.to_networkx()
-        pos = _normalize(nx.spring_layout(nxg, seed=7, k=1.6 / max(1, len(G)) ** 0.5))
-        edges = [(u, v, G.edge_attrs(u, v)) for u, v in G.edges]
-        nodes = G.vertices
-    else:
-        G = analysis.drawing_graph
-        pos = _normalize(analysis.positions)
-        edges = [(u, v, G.edge_attrs(u, v)) for u, v in G.edges]
-        nodes = G.vertices
+def batch_positions(p: Plan) -> Dict[str, Position]:
+    pos: Dict[str, Position] = {}
+    for col, batch in enumerate(p.batches):
+        n = len(batch.tasks)
+        for row, task in enumerate(batch.tasks):
+            pos[task] = (float(col), 0.5 if n == 1 else 1 - row / (n - 1))
+    return pos
 
-    crossings = count_crossings(pos, [(u, v) for u, v, _ in edges]) if len(edges) < 4000 else -1
-    n_real = analysis.architecture_graph.num_vertices
-    if show_labels is None:
-        show_labels = n_real <= 60
+
+def spring_positions(p: Plan, seed: int = 7) -> Dict[str, Position]:
+    g = p.graph
+    return nx.spring_layout(g.to_networkx(), seed=seed, k=1.6 / max(1, len(g)) ** 0.5)
+
+
+def draw_plan(p: Plan, layout: str = "spring", figsize: Tuple[float, float] = (11, 7)):
+    if layout not in LAYOUTS:
+        raise ValueError(f"Layout desconocido: {layout!r}. Opciones: {LAYOUTS}")
+    g, colors = p.graph, p.coloring.colors
+    pos = batch_positions(p) if layout == "batches" else spring_positions(p)
+    n = g.num_vertices
 
     fig, ax = plt.subplots(figsize=figsize)
-    dep, con = [], []
-    for u, v, attrs in edges:
-        seg = [pos[u], pos[v]]
-        (con if "conflict" in attrs.get("kinds", []) else dep).append(seg)
-    ax.add_collection(LineCollection(dep, colors="#7A7F87", linewidths=1.2, zorder=1))
-    ax.add_collection(LineCollection(con, colors="#D62728", linewidths=1.6, linestyles="--", zorder=2))
-
-    constrained = set(analysis.constrained_vertices())
-    colors = analysis.coloring.colors
-    size = 700 if n_real <= 25 else 300 if n_real <= 60 else 40 if n_real <= 300 else 8
-    real = [v for v in nodes if v in analysis.architecture_graph]
-    virtual = [v for v in nodes if v not in analysis.architecture_graph]
-    fc = [PALETTE[colors[v] % len(PALETTE)] if v in constrained else FREE_COLOR for v in real]
-    ax.scatter([pos[v][0] for v in real], [pos[v][1] for v in real], s=size, c=fc,
+    segments = [[pos[u], pos[v]] for u, v in g.edges]
+    ax.add_collection(LineCollection(segments, colors="#8a929d", linewidths=1.0, alpha=0.7, zorder=1))
+    size = 650 if n <= 25 else 260 if n <= 60 else 40 if n <= 300 else 8
+    vs = g.vertices
+    ax.scatter([pos[v][0] for v in vs], [pos[v][1] for v in vs], s=size, c=[batch_color(colors[v]) for v in vs],
                edgecolors="#222", linewidths=0.8, zorder=3)
-    if virtual:
-        ax.scatter([pos[v][0] for v in virtual], [pos[v][1] for v in virtual], s=size * 0.25, marker="D",
-                   facecolors="white", edgecolors="#222", linewidths=1.2, zorder=4)
-    if show_labels:
-        for v in real:
-            label = str(analysis.label(v))
-            ax.annotate(label if len(label) <= 22 else label[:21] + "…", pos[v], fontsize=7.5,
-                        ha="center", va="bottom", xytext=(0, 9 if size > 100 else 4),
-                        textcoords="offset points", zorder=5)
+    if n <= LABELS_MAX_NODES:
+        for v in vs:
+            label = v if len(v) <= 22 else v[:21] + "…"
+            ax.annotate(label, pos[v], fontsize=7.5, ha="center", va="bottom", zorder=4,
+                        xytext=(0, 13 if size > 300 else 9 if size > 100 else 4), textcoords="offset points")
 
-    handles = [Patch(facecolor=PALETTE[c % len(PALETTE)], edgecolor="#222", label=f"Lote {c + 1}")
-               for c in sorted(analysis.coloring.batches)
-               if any(v in constrained for v in analysis.coloring.batches[c])]
-    handles += [Patch(facecolor=FREE_COLOR, edgecolor="#222", label="Sin restricciones"),
-                Line2D([0], [0], color="#7A7F87", lw=1.5, label="Dependencia"),
-                Line2D([0], [0], color="#D62728", lw=1.8, ls="--", label="Conflicto")]
-    if virtual:
-        handles.append(Line2D([0], [0], marker="D", color="w", markerfacecolor="white", markeredgecolor="#222",
-                              label="Nodo virtual (cruce)"))
+    handles = [Patch(facecolor=batch_color(b.index - 1), edgecolor="#222", label=f"Lote {b.index}")
+               for b in p.batches[:12]]
     ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1), fontsize=8, frameon=False)
-
-    chi = analysis.coloring.num_colors
-    title = analysis.spec.title or "Grafo de recursos"
-    kind = "layout plano" if layout != "spring" else "layout de fuerzas"
-    sub = f"{kind} · cruces: {crossings if crossings >= 0 else 'n/d'} · χ(G) ≤ {chi}"
-    ax.set_title(f"{title}\n{sub}", fontsize=11)
-    ax.set_xlim(-0.08, 1.08)
-    ax.set_ylim(-0.1, 1.12)
+    b = p.bounds
+    chi = f"χ(G) = {b['exact']}" if b["exact"] is not None else f"{b['lower']} ≤ χ(G) ≤ {b['upper']}"
+    ax.set_title(f"{p.problem.title or 'Asignación de recursos'}\n"
+                 f"{ALGORITHM_NAMES[p.coloring.algorithm]}: {p.coloring.num_colors} lotes · {chi}", fontsize=11)
+    ax.autoscale()
+    ax.margins(0.08)
     ax.axis("off")
     fig.tight_layout()
-    return fig, crossings
+    return fig

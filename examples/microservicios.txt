@@ -1,0 +1,16 @@
+titulo: Despliegue nocturno de un e-commerce
+# Tarea [duración en minutos]: recursos exclusivos que usa
+Migrar BD pedidos [30]: db_pedidos
+Respaldo pedidos [20]: db_pedidos, disco_respaldo
+Respaldo inventario [15]: db_inventario, disco_respaldo
+Recalcular stock [25]: db_inventario, cola_eventos
+Reindexar catálogo [40]: indice_busqueda, db_inventario
+Desplegar API pagos [10]: cluster_pagos
+Pruebas de humo pagos [10]: cluster_pagos, db_pedidos
+Reporte de ventas [20]: db_pedidos, db_inventario
+Purgar notificaciones [5]: cola_eventos
+Rotar certificados [5]: balanceador
+Desplegar frontend [10]: balanceador, cdn
+Calentar caché CDN [15]: cdn, indice_busqueda
+# Conflictos que no vienen de un recurso
+Desplegar API pagos -- Desplegar frontend

@@ -25,6 +25,18 @@ from typing import Dict, List, Optional
 from .graph import Graph, Vertex
 
 
+@dataclass(frozen=True)
+class ColoringStep:
+    """Una decision del algoritmo: ``vertex`` recibe ``color``.
+
+    ``saturation`` = colores distintos entre sus vecinos ya coloreados en ese momento (solo DSatur;
+    en Welsh-Powell es None porque el criterio es el grado y la ronda).
+    """
+    vertex: Vertex
+    color: int
+    saturation: Optional[int] = None
+
+
 @dataclass
 class ColoringResult:
     algorithm: str
@@ -32,18 +44,20 @@ class ColoringResult:
     num_colors: int
     valid: bool = True
     batches: Dict[int, List[Vertex]] = field(default_factory=dict)  # color -> vertices
+    steps: List[ColoringStep] = field(default_factory=list)         # orden en que se coloreo
 
     def batch_list(self) -> List[List[Vertex]]:
         return [self.batches[c] for c in sorted(self.batches)]
 
 
-def _build_result(graph: Graph, algorithm: str, colors: Dict[Vertex, int]) -> ColoringResult:
+def _build_result(graph: Graph, algorithm: str, colors: Dict[Vertex, int],
+                  steps: List[ColoringStep]) -> ColoringResult:
     batches: Dict[int, List[Vertex]] = {}
     for v in graph.vertices:                         # orden estable
         batches.setdefault(colors[v], []).append(v)
     return ColoringResult(algorithm=algorithm, colors=colors,
                           num_colors=len(batches), valid=is_valid_coloring(graph, colors),
-                          batches=batches)
+                          batches=batches, steps=steps)
 
 
 def is_valid_coloring(graph: Graph, colors: Dict[Vertex, int]) -> bool:
@@ -70,6 +84,7 @@ def dsatur(graph: Graph) -> ColoringResult:
     deg = {v: graph.degree(v) for v in labels}
     nbr_colors: Dict[Vertex, set] = {v: set() for v in labels}
     colors: Dict[Vertex, int] = {}
+    steps: List[ColoringStep] = []
 
     heap = [(0, -deg[v], idx[v]) for v in labels]
     heapq.heapify(heap)
@@ -83,11 +98,12 @@ def dsatur(graph: Graph) -> ColoringResult:
         while c in used:                              # menor color disponible (mex)
             c += 1
         colors[v] = c
+        steps.append(ColoringStep(v, c, len(used)))
         for u in graph.neighbors(v):
             if u not in colors and c not in nbr_colors[u]:
                 nbr_colors[u].add(c)
                 heapq.heappush(heap, (-len(nbr_colors[u]), -deg[u], idx[u]))
-    return _build_result(graph, "dsatur", colors)
+    return _build_result(graph, "dsatur", colors, steps)
 
 
 # ----------------------------------------------------------------------- Welsh-Powell
@@ -99,6 +115,7 @@ def welsh_powell(graph: Graph) -> ColoringResult:
     """
     order = sorted(graph.vertices, key=lambda v: -graph.degree(v))   # sort estable
     colors: Dict[Vertex, int] = {}
+    steps: List[ColoringStep] = []
     remaining = len(order)
     c = 0
     while remaining:
@@ -107,40 +124,51 @@ def welsh_powell(graph: Graph) -> ColoringResult:
             if v in colors or v in blocked:
                 continue
             colors[v] = c
+            steps.append(ColoringStep(v, c))
             remaining -= 1
             blocked.update(graph.neighbors(v))
         c += 1
-    return _build_result(graph, "welsh_powell", colors)
+    return _build_result(graph, "welsh_powell", colors, steps)
 
 
 ALGORITHMS = {"dsatur": dsatur, "welsh_powell": welsh_powell}
+ALGORITHM_NAMES = {"dsatur": "DSatur", "welsh_powell": "Welsh-Powell"}
 
 
 def color_graph(graph: Graph, algorithm: str = "dsatur") -> ColoringResult:
-    try:
-        return ALGORITHMS[algorithm](graph)
-    except KeyError:
+    if algorithm not in ALGORITHMS:
         raise ValueError(f"Algoritmo desconocido: {algorithm!r}. Opciones: {sorted(ALGORITHMS)}")
+    return ALGORITHMS[algorithm](graph)
 
 
 # ------------------------------------------------------------------------------ cotas
+CLIQUE_REFINE_SIZE = 48     # con mas candidatos, elegir por grado (O(k)) en vez de por interseccion (O(k^2))
+
+
 def greedy_clique(graph: Graph, starts: int = 25) -> List[Vertex]:
     """
     Clique hallada vorazmente (se intenta desde los ``starts`` vertices de mayor grado).
     Sus miembros son tareas que se bloquean mutuamente: fuerzan al menos |clique| lotes.
+
+    Con pocos candidatos se elige el que tiene mas vecinos dentro de ellos (mejor calidad); con
+    muchos, el de mayor grado, para que una clique enorme cueste O(k^2) por inicio y no O(k^3).
     """
     if graph.num_vertices == 0:
         return []
-    order = sorted(graph.vertices, key=lambda v: -graph.degree(v))
+    nbrs = {v: set(graph.neighbors(v)) for v in graph.vertices}
+    order = sorted(graph.vertices, key=lambda v: -len(nbrs[v]))
+    rank = {v: i for i, v in enumerate(order)}
     best: List[Vertex] = [order[0]]
     for s in order[:starts]:
         clique = [s]
-        cand = set(graph.neighbors(s))
+        cand = set(nbrs[s])
         while cand:
-            # el candidato con mas vecinos dentro de cand maximiza el crecimiento
-            v = max(cand, key=lambda x: len(cand.intersection(graph.neighbors(x))))
+            if len(cand) > CLIQUE_REFINE_SIZE:
+                v = min(cand, key=rank.__getitem__)
+            else:
+                v = max(cand, key=lambda x: (len(cand & nbrs[x]), -rank[x]))
             clique.append(v)
-            cand &= set(graph.neighbors(v))
+            cand &= nbrs[v]
         if len(clique) > len(best):
             best = clique
     return best
@@ -155,7 +183,7 @@ class _SearchLimit(Exception):
     pass
 
 
-def _exact_component(sub: Graph, node_limit: int) -> Optional[int]:
+def _exact_component(sub: Graph, budget: Dict[str, int]) -> Optional[int]:
     upper = dsatur(sub).num_colors
     lower = clique_lower_bound(sub)
     if lower >= upper:
@@ -167,7 +195,7 @@ def _exact_component(sub: Graph, node_limit: int) -> Optional[int]:
     cnt: Dict[Vertex, Dict[int, int]] = {v: {} for v in labels}   # color -> #vecinos con ese color
     sat = {v: 0 for v in labels}
     colored: Dict[Vertex, int] = {}
-    state = {"best": upper, "nodes": 0}
+    state = {"best": upper}
 
     def assign(v: Vertex, c: int) -> None:
         colored[v] = c
@@ -187,8 +215,8 @@ def _exact_component(sub: Graph, node_limit: int) -> Optional[int]:
                     sat[u] -= 1
 
     def search(used: int) -> None:
-        state["nodes"] += 1
-        if state["nodes"] > node_limit:
+        budget["left"] -= 1
+        if budget["left"] < 0:
             raise _SearchLimit
         if len(colored) == len(labels):
             state["best"] = used
@@ -216,17 +244,21 @@ def _exact_component(sub: Graph, node_limit: int) -> Optional[int]:
 def exact_chromatic_number(graph: Graph, max_vertices: int = 60,
                            node_limit: int = 200_000) -> Optional[int]:
     """
-    chi(G) exacto por branch & bound (DSatur + cotas). Solo componentes conexas de
-    hasta ``max_vertices`` vertices y ``node_limit`` nodos de busqueda; si se excede
-    devuelve None (el valor exacto es NP-dificil en general).
+    chi(G) exacto por branch & bound (DSatur + cotas). Solo si toda componente conexa tiene
+    hasta ``max_vertices`` vertices; ``node_limit`` nodos de busqueda en TOTAL (compartidos por
+    todas las componentes). Si se excede devuelve None (el valor exacto es NP-dificil en general).
     """
     if graph.num_vertices == 0:
         return 0
+    comps = sorted(graph.connected_components(), key=len, reverse=True)
+    if len(comps[0]) > max_vertices:
+        return None
+    budget = {"left": node_limit}
     chi = 1
-    for comp in graph.connected_components():
-        if len(comp) > max_vertices:
-            return None
-        res = _exact_component(graph.subgraph(comp), node_limit)
+    for comp in comps:
+        if len(comp) <= chi:                       # chi(componente) <= |componente|: no puede subir
+            break
+        res = _exact_component(graph.subgraph(comp), budget)
         if res is None:
             return None
         chi = max(chi, res)

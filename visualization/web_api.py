@@ -1,111 +1,86 @@
 """
-Punto de entrada de la app web (lo invoca el Web Worker de Pyodide, ver visualization/web/worker.js).
+API que el Web Worker invoca dentro de Pyodide. Entrada y salida son cadenas JSON.
 
-Todas las funciones reciben y devuelven JSON (str) para que el cruce JavaScript <-> Python sea
-trivial y no haya objetos proxy que liberar. Los errores esperables (entrada invalida, fallo del
-LLM) se devuelven como ``{"ok": false, "error": "..."}`` con un mensaje apto para el usuario.
+    metadata()            -> {"examples": [...], "algorithms": [...], "limits": {...}}
+    handle(request_json)  -> {"ok": true, "view": {...}} | {"ok": false, "error": "mensaje"}
+
+Peticiones:
+    {"mode": "text",   "text": "...",                 "algorithm": "dsatur"}
+    {"mode": "random", "n": 100, "p": 0.05, "seed": 1, "algorithm": "welsh_powell"}
 """
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-from ai_agent import (EXAMPLES, BrowserClient, GraphSpec, LLMClient, LLMError, OfflineClient, ReportGenerator,
-                      RequirementParser)
-from ai_agent.parser import MAX_INPUT_CHARS
-from graph_core import ALGORITHMS
-from pipeline import analyze_spec
+from graph_core import ALGORITHMS, ProblemError, parse_problem, plan
+from graph_core.generators import random_problem
+from graph_core.problem import MAX_TASKS, MAX_TEXT_CHARS
+from graph_core.scheduling import MAX_CONFLICTS
 
+from .examples import load_examples
 from .view_model import build_view
 
-MODES = ("text", "example", "json")
-MAX_JSON_CHARS = 200_000
-GENERIC_ERROR = "Error interno al analizar el grafo. Revise la entrada e intente de nuevo."
+log = logging.getLogger(__name__)
+GENERIC_ERROR = "Ocurrió un error inesperado al procesar el problema. Revise la entrada e intente de nuevo."
 
-logger = logging.getLogger(__name__)
+
+class RequestError(ValueError):
+    """Peticion mal formada (mensaje apto para el usuario)."""
 
 
 def metadata() -> str:
-    """Datos estaticos para poblar la interfaz (ejemplos, algoritmos, limites)."""
-    return json.dumps({
-        "examples": [{"key": k, "title": v["title"]} for k, v in EXAMPLES.items()],
-        "example_specs": EXAMPLES,
-        "algorithms": sorted(ALGORITHMS),
-        "max_input_chars": MAX_INPUT_CHARS,
-    }, ensure_ascii=False)
+    examples = [{"key": k, **v} for k, v in load_examples().items()]
+    limits = {"max_tasks": MAX_TASKS, "max_text_chars": MAX_TEXT_CHARS, "max_conflicts": MAX_CONFLICTS}
+    return json.dumps({"examples": examples, "algorithms": list(ALGORITHMS), "limits": limits}, ensure_ascii=False)
 
 
-def _make_client(req: Dict[str, Any], bridge: Any) -> LLMClient:
-    provider = req.get("provider", "offline")
-    if provider == "offline":
-        return OfflineClient()
-    if bridge is None:
-        raise LLMError("No hay puente JavaScript para llamar al LLM")
-    return BrowserClient(bridge, provider, model=req.get("model") or None, effort=req.get("effort") or None)
+def _algorithm(req: Dict[str, Any]) -> str:
+    alg = req.get("algorithm", "dsatur")
+    if not isinstance(alg, str) or alg not in ALGORITHMS:
+        raise RequestError(f"Algoritmo desconocido. Opciones: {', '.join(ALGORITHMS)}")
+    return alg
 
 
-def _spec_from_request(req: Dict[str, Any]) -> GraphSpec:
+def _number(req: Dict[str, Any], key: str, kind: type, low: float, high: float) -> Any:
+    value = req.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RequestError(f"«{key}» debe ser un número")
+    if kind is int and value != int(value):
+        raise RequestError(f"«{key}» debe ser un entero")
+    if not low <= value <= high:
+        raise RequestError(f"«{key}» debe estar entre {low:g} y {high:g}")
+    return kind(value)
+
+
+def _problem(req: Dict[str, Any]):
     mode = req.get("mode")
-    if mode == "example":
-        key = req.get("example")
-        if key not in EXAMPLES:
-            raise ValueError(f"Ejemplo desconocido: {key!r}")
-        return GraphSpec.model_validate(EXAMPLES[key])
-    raw = str(req.get("spec_json") or "")
-    if len(raw) > MAX_JSON_CHARS:
-        raise ValueError(f"El JSON excede {MAX_JSON_CHARS} caracteres")
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"JSON invalido: {exc.msg} (linea {exc.lineno}, columna {exc.colno})") from exc
-    return GraphSpec.model_validate(data)
-
-
-async def _analyze(req: Dict[str, Any], bridge: Any) -> Dict[str, Any]:
-    mode = req.get("mode")
-    if mode not in MODES:
-        raise ValueError(f"Modo desconocido: {mode!r}")
-    algorithm = req.get("algorithm", "dsatur")
-    if not isinstance(algorithm, str) or algorithm not in ALGORITHMS:
-        raise ValueError(f"Algoritmo desconocido: {algorithm!r}")
-    client = _make_client(req, bridge)
-
     if mode == "text":
-        parsed = await RequirementParser(client).parse(str(req.get("text") or ""))
-        spec, warnings, attempts = parsed.spec, list(parsed.warnings), parsed.attempts
-    else:
-        spec, warnings = _spec_from_request(req).sanitized()
-        attempts = 0
-
-    analysis = analyze_spec(spec, algorithm)
-    warnings += _analysis_warnings(analysis.facts())
-    report_text, source = None, ""
-    if req.get("with_report", True):
-        report = await ReportGenerator(client).generate(analysis.facts())
-        report_text, source = report.text, report.source
-        if report.warning:
-            warnings.append(report.warning)
-    return build_view(analysis, report_text, source, warnings, client.name, attempts)
+        text = req.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise RequestError("Escriba al menos una tarea.")
+        return parse_problem(text)
+    if mode == "random":
+        n = _number(req, "n", int, 1, MAX_TASKS)
+        p = _number(req, "p", float, 0, 1)
+        seed = _number(req, "seed", int, 0, 2**31 - 1) if "seed" in req else 0
+        if p * n * (n - 1) / 2 > MAX_CONFLICTS:
+            raise RequestError(f"Con n = {n} la probabilidad máxima es {2 * MAX_CONFLICTS / (n * (n - 1)):.4f} "
+                               f"({MAX_CONFLICTS} conflictos)")
+        return random_problem(n, p, seed)
+    raise RequestError("Modo desconocido; use «text» o «random».")
 
 
-def _analysis_warnings(facts: Dict[str, Any]) -> List[str]:
-    unrouted = facts["planarity"]["unrouted_edges"]
-    if not unrouted:
-        return []
-    return [f"La planarizacion alcanzo su limite de tiempo: {unrouted} arista(s) no se dibujaron."]
-
-
-async def handle(request_json: str, bridge: Optional[Any] = None) -> str:
-    """Analiza una solicitud de la web. ``bridge``: objeto JS con ``request(provider, payload)``."""
+def handle(request_json: str) -> str:
     try:
         req = json.loads(request_json)
         if not isinstance(req, dict):
-            raise ValueError("La solicitud debe ser un objeto JSON")
-        view = await _analyze(req, bridge)
-    except (LLMError, ValueError) as exc:          # pydantic.ValidationError hereda de ValueError
+            raise RequestError("La petición debe ser un objeto JSON.")
+        view = build_view(plan(_problem(req), _algorithm(req)))
+        return json.dumps({"ok": True, "view": view}, ensure_ascii=False)
+    except (RequestError, ProblemError) as exc:
         return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
-    except Exception:                              # nunca mostrar un traceback al usuario
-        logger.exception("Fallo inesperado en web_api.handle")
+    except Exception:                                       # nunca mostrar trazas al usuario
+        log.exception("Fallo inesperado en handle()")
         return json.dumps({"ok": False, "error": GENERIC_ERROR}, ensure_ascii=False)
-    return json.dumps({"ok": True, "view": view}, ensure_ascii=False, default=str)

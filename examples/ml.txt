@@ -1,0 +1,12 @@
+titulo: Plataforma de machine learning (una sola GPU de cada tipo)
+Ingesta de datos [2]: disco_datos
+Limpieza [1]: disco_datos, cpu_grande
+Features [2]: cpu_grande, feature_store
+Entrenar modelo A [4]: gpu_a100, feature_store
+Entrenar modelo B [3]: gpu_a100
+Afinar hiperparámetros [3]: gpu_t4, feature_store
+Evaluar modelos [1]: gpu_t4
+Exportar checkpoint [1]: disco_modelos
+Publicar modelo [1]: disco_modelos, cluster_inferencia
+Pruebas A/B [2]: cluster_inferencia
+Evaluar modelos -- Entrenar modelo B

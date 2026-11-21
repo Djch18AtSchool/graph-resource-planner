@@ -97,3 +97,45 @@ def test_invalid_coloring_detected():
     g = Graph(edges=[("a", "b")])
     assert not is_valid_coloring(g, {"a": 0, "b": 0})
     assert not is_valid_coloring(g, {"a": 0})
+
+
+# ------------------------------------------------------------------ pasos (vista paso a paso)
+@pytest.mark.parametrize("algo", ALGOS)
+def test_steps_color_every_vertex_once_and_match_the_result(algo):
+    g = G(nx.gnp_random_graph(30, 0.25, seed=4))
+    r = algo(g)
+    assert sorted(s.vertex for s in r.steps) == sorted(g.vertices)
+    assert all(r.colors[s.vertex] == s.color for s in r.steps)
+
+
+def test_dsatur_steps_record_saturation_at_selection_time():
+    g = G(nx.gnp_random_graph(30, 0.25, seed=4))
+    r = dsatur(g)
+    first = r.steps[0]
+    assert first.saturation == 0 and g.degree(first.vertex) == max(g.degree(v) for v in g)
+    seen = {}
+    for s in r.steps:
+        assert s.saturation == len({seen[u] for u in g.neighbors(s.vertex) if u in seen})
+        seen[s.vertex] = s.color
+
+
+def test_welsh_powell_steps_go_round_by_round():
+    r = welsh_powell(G(nx.gnp_random_graph(30, 0.25, seed=4)))
+    colors = [s.color for s in r.steps]
+    assert colors == sorted(colors) and all(s.saturation is None for s in r.steps)
+
+
+def test_exact_search_budget_is_shared_across_components():
+    import time
+    from graph_core.generators import random_edges
+    g = Graph()
+    for k in range(12):                                       # 12 componentes dificiles de 60 vertices
+        for u, v in random_edges(60, int(0.6 * 60 * 59 / 2), seed=2):
+            g.add_edge((k, u), (k, v))
+    t0 = time.perf_counter()
+    exact_chromatic_number(g, node_limit=20_000)
+    assert time.perf_counter() - t0 < 5
+
+
+def test_greedy_clique_finds_the_whole_complete_graph_quickly():
+    assert len(greedy_clique(G(nx.complete_graph(400)))) == 400
