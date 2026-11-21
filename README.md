@@ -53,19 +53,25 @@ Es un sitio estático (GitHub Pages) que ejecuta **el mismo código Python del r
 copia del algoritmo en JavaScript.
 
 * **Entrada:**
-  * Editor de texto con 4 ejemplos: despliegue de microservicios, horario de exámenes, plataforma de ML y un caso
-    difícil para Welsh-Powell.
+  * Editor con números de línea, que marca la línea donde hay un error.
+  * 4 ejemplos: despliegue de microservicios, horario de exámenes, plataforma de ML y un caso difícil para
+    Welsh-Powell.
   * Generador aleatorio G(n, p) para probar con 10, 100 y 1000 nodos.
-* **Grafo coloreado:** se puede ver con un layout de fuerzas o **por lotes**. En la vista por lotes cada columna
-  es un color y todas las aristas cruzan entre columnas, lo que muestra que la coloración es válida.
+  * Cambiar entre DSatur y Welsh-Powell recalcula al instante.
+* **Resultado:** χ(G) escrito como fórmula, con una frase que dice por qué es el mínimo (o entre qué valores
+  está), y una **franja de lotes**: cada color es un lote y su ancho es su duración. Al pasar el cursor por un
+  lote se resaltan sus tareas en el grafo.
+* **Grafo coloreado:** vista libre o **por lotes**. En la vista por lotes cada columna es un color y todas las
+  aristas cruzan entre columnas, lo que muestra que la coloración es válida.
 * **Paso a paso:** un deslizador y ▶ animan el algoritmo y explican cada decisión. En DSatur se muestran la
   saturación y el grado; en Welsh-Powell, la ronda.
-* **Resaltar la clique** que justifica la cota inferior.
+* **Mostrar la clique** que justifica la cota inferior.
 * **Pestañas:**
-  * Plan por lotes (diagrama de Gantt).
+  * Cronograma (diagrama de Gantt).
   * Recursos (cada recurso es una clique K_k).
   * Matriz de adyacencia.
   * Tiempos de cada etapa.
+* Tema claro (papel cuadriculado) y oscuro (pizarra).
 
 ### Formato de entrada
 

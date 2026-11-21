@@ -4,20 +4,33 @@
 //   "batches" : una columna por lote; como cada lote es un conjunto independiente, todas las
 //               aristas cruzan entre columnas: se "ve" que la coloración es válida.
 
-export const PALETTE = ["#4C78A8", "#F58518", "#54A24B", "#E45756", "#B279A2", "#72B7B2",
-  "#EECA3B", "#9D755D", "#FF9DA6", "#79706E", "#439894", "#D67195"];
+// Colores de rotulador: distinguibles entre sí y legibles sobre papel y sobre pizarra.
+export const PALETTE = ["#3B6FE0", "#F08A24", "#22A06B", "#E5484D", "#8B5CF6", "#E2B203",
+  "#0EA5B7", "#DB4C9A", "#7C8C2A", "#B5651D", "#84CC16", "#0F766E"];
 export const FORCE_MAX_NODES = 250;          // más allá, cose tarda demasiado en el navegador
 const LABEL_MAX_NODES = 80;
 const GOLDEN_ANGLE = 137.508;
 const COLUMN_GAP = 170;
-const ROW_GAP = 46;
+const ROW_GAP = 50;
+const DARK_TEXT = "#16213A";
+const LIGHT_TEXT = "#FFFFFF";
 
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 /** Color del lote (1-indexado). Los primeros 12 son de la paleta; después, tonos por ángulo áureo. */
 export function batchColor(batch) {
   if (batch <= PALETTE.length) return PALETTE[batch - 1];
-  return `hsl(${Math.round((batch * GOLDEN_ANGLE) % 360)}, 55%, 55%)`;
+  return `hsl(${Math.round((batch * GOLDEN_ANGLE) % 360)}, 58%, 46%)`;
+}
+
+/** Texto legible sobre el color de un lote (contraste por luminancia relativa). */
+export function textOnBatch(batch) {
+  const hex = batchColor(batch);
+  if (!hex.startsWith("#")) return LIGHT_TEXT;
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return luminance > 0.33 ? DARK_TEXT : LIGHT_TEXT;
 }
 
 /**
@@ -57,24 +70,28 @@ function elements(view) {
 // Tamaños en píxeles de pantalla divididos por el zoom tras ajustar: se ven igual en grafos grandes y chicos.
 function style(nodeCount, zoom) {
   const px = (v) => v / zoom;
-  const size = px(nodeCount <= 20 ? 28 : nodeCount <= 60 ? 20 : nodeCount <= 300 ? 12 : 8);
+  const size = px(nodeCount <= 20 ? 30 : nodeCount <= 60 ? 22 : nodeCount <= 300 ? 12 : 8);
   const showLabels = nodeCount <= LABEL_MAX_NODES;
+  const ink = cssVar("--ink");
   return [
     { selector: "node", style: {
-      width: size, height: size, "background-color": "data(color)", "border-width": px(1.5),
-      "border-color": "#20242a", label: showLabels ? "data(label)" : "", "font-size": px(11),
-      "font-family": "Inter, sans-serif", color: cssVar("--text"), "text-valign": "bottom", "text-margin-y": px(3),
-      "text-wrap": "wrap", "text-max-width": px(120), "text-background-color": cssVar("--graph-bg"),
-      "text-background-opacity": 0.8, "text-background-padding": px(1) } },
-    { selector: "edge", style: { width: px(nodeCount <= 300 ? 1.4 : 0.6), "line-color": cssVar("--edge"),
-      "curve-style": "straight", opacity: nodeCount <= 300 ? 0.85 : 0.35 } },
+      width: size, height: size, "background-color": "data(color)", "border-width": px(2), "border-color": ink,
+      label: showLabels ? "data(label)" : "", "font-size": px(12), "font-family": "Bricolage Grotesque, sans-serif",
+      "font-weight": 500, color: ink, "text-valign": "bottom", "text-margin-y": px(5), "text-wrap": "wrap",
+      "text-max-width": px(130), "text-background-color": cssVar("--sheet"), "text-background-opacity": 0.85,
+      "text-background-padding": px(2), "text-background-shape": "roundrectangle",
+      "transition-property": "background-color, opacity", "transition-duration": "180ms" } },
+    { selector: "edge", style: { width: px(nodeCount <= 300 ? 1.6 : 0.6), "line-color": cssVar("--edge"),
+      "curve-style": "straight", opacity: nodeCount <= 300 ? 0.9 : 0.35 } },
     { selector: "edge[?explicit]", style: { "line-style": "dashed", "line-dash-pattern": [px(6), px(4)] } },
-    { selector: "node.pending", style: { "background-color": cssVar("--free"), "border-color": cssVar("--edge") } },
-    { selector: "node.current", style: { "border-color": cssVar("--accent"), "border-width": px(5) } },
-    { selector: "node.faded, edge.faded", style: { opacity: 0.12 } },
-    { selector: "node.in-clique", style: { "border-color": cssVar("--clique"), "border-width": px(4) } },
-    { selector: "edge.in-clique", style: { "line-color": cssVar("--clique"), width: px(3), opacity: 1, "z-index": 5 } },
-    { selector: ":selected", style: { "overlay-color": cssVar("--accent"), "overlay-opacity": 0.18 } },
+    { selector: "node.pending", style: { "background-color": cssVar("--pending"), "border-color": cssVar("--edge") } },
+    { selector: "node.current", style: { "border-width": px(5), "border-color": cssVar("--focus"),
+      "underlay-color": cssVar("--focus"), "underlay-opacity": 0.18, "underlay-padding": px(8), "underlay-shape": "ellipse" } },
+    { selector: "node.dim, edge.dim", style: { opacity: 0.12 } },
+    { selector: "node.in-clique", style: { "border-width": px(5), "underlay-color": ink, "underlay-opacity": 0.12,
+      "underlay-padding": px(7), "underlay-shape": "ellipse" } },
+    { selector: "edge.in-clique", style: { "line-color": ink, width: px(3.2), opacity: 1, "z-index": 5 } },
+    { selector: ":selected", style: { "overlay-color": cssVar("--focus"), "overlay-opacity": 0.16 } },
   ];
 }
 
@@ -85,6 +102,8 @@ export class GraphView {
     this.onInspect = onInspect;
     this.cy = null;
     this.view = null;
+    this.clique = false;
+    this.focusBatch = null;
   }
 
   /** Dibuja la vista. Devuelve una promesa que se resuelve cuando termina el layout. */
@@ -97,32 +116,33 @@ export class GraphView {
       layout: { name: "preset", positions: positions ? (n) => positions.get(n.id()) : undefined },
     });
     this.bindTaps();
-    const done = new Promise((resolve) => {
+    return new Promise((resolve) => {
       const finish = () => {
-        this.cy.fit(undefined, 40);
+        this.cy.fit(undefined, 44);
         this.cy.style(style(view.tasks.length, this.cy.zoom() || 1));
+        this.applyHighlight();
         resolve();
       };
       if (positions) { finish(); return; }
-      const run = this.cy.layout({ name: "cose", animate: false, randomize: true, nodeRepulsion: () => 60000,
-        idealEdgeLength: () => 110, nodeOverlap: 40, componentSpacing: 90, gravity: 0.6, numIter: 2500 });
+      this.cy.style(style(view.tasks.length, 1));   // etiquetas con tamaño real para que el layout las respete
+      const run = this.cy.layout({ name: "cose", animate: false, randomize: true, nodeDimensionsIncludeLabels: true,
+        nodeRepulsion: () => 400000, idealEdgeLength: () => 120, edgeElasticity: () => 80, nodeOverlap: 60,
+        componentSpacing: 120, gravity: 0.4, numIter: 3000, padding: 40 });
       run.one("layoutstop", finish);
       run.run();
     });
-    return done;
   }
 
   bindTaps() {
     this.cy.on("tap", "node", (ev) => {
       const d = ev.target.data();
-      const res = d.resources.length ? ` · recursos: ${d.resources.join(", ")}` : "";
-      this.onInspect(`${d.label} · lote ${d.batch} · duración ${d.duration} · grado ${d.degree}${res}`);
+      const res = d.resources.length ? `Usa ${d.resources.join(", ")}.` : "No usa recursos.";
+      this.onInspect(`«${d.label}» va en el lote ${d.batch}, dura ${d.duration} y choca con ${d.degree} tarea(s). ${res}`);
     });
     this.cy.on("tap", "edge", (ev) => {
       const d = ev.target.data();
-      const why = [d.resources.length ? `comparten ${d.resources.join(", ")}` : "", d.explicit ? "conflicto declarado" : ""]
-        .filter(Boolean).join(" · ");
-      this.onInspect(`${d.source} — ${d.target} · ${why}`);
+      const why = d.resources.length ? `comparten ${d.resources.join(", ")}` : "se declaró el conflicto";
+      this.onInspect(`«${d.source}» y «${d.target}» no pueden ir en el mismo lote: ${why}.`);
     });
   }
 
@@ -142,23 +162,36 @@ export class GraphView {
 
   /** Resalta la clique que justifica la cota inferior de χ(G). */
   setClique(on) {
+    this.clique = on;
+    this.applyHighlight();
+  }
+
+  /** Destaca las tareas de un lote (o ninguno con null). */
+  setBatchFocus(batch) {
+    this.focusBatch = batch;
+    this.applyHighlight();
+  }
+
+  applyHighlight() {
     if (!this.cy) return;
-    const members = new Set(on ? this.view.clique : []);
+    const members = new Set(this.clique ? this.view.clique : []);
+    const focus = this.focusBatch;
     this.cy.batch(() => {
       this.cy.nodes().forEach((n) => {
-        const inside = members.has(n.id());
-        n.toggleClass("in-clique", inside);
-        n.toggleClass("faded", on && !inside);
+        const inClique = members.has(n.id());
+        const keep = focus !== null ? n.data("batch") === focus : !this.clique || inClique;
+        n.toggleClass("in-clique", inClique);
+        n.toggleClass("dim", !keep);
       });
       this.cy.edges().forEach((e) => {
-        const inside = members.has(e.data("source")) && members.has(e.data("target"));
-        e.toggleClass("in-clique", inside);
-        e.toggleClass("faded", on && !inside);
+        const inClique = members.has(e.data("source")) && members.has(e.data("target"));
+        e.toggleClass("in-clique", inClique && focus === null);
+        e.toggleClass("dim", focus !== null || (this.clique && !inClique));
       });
     });
   }
 
-  fit() { if (this.cy) this.cy.fit(undefined, 40); }
+  fit() { if (this.cy) this.cy.fit(undefined, 44); }
 
   clear() {
     if (this.cy) this.cy.destroy();
@@ -167,6 +200,6 @@ export class GraphView {
 
   png() {
     if (!this.cy) return null;
-    return this.cy.png({ full: true, scale: 2, bg: cssVar("--graph-bg") });
+    return this.cy.png({ full: true, scale: 2, bg: cssVar("--paper") });
   }
 }

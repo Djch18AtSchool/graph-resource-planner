@@ -1,15 +1,18 @@
 // Controlador de la interfaz: lee el formulario, habla con el Web Worker (Python) y pinta resultados.
 import { FORCE_MAX_NODES, GraphView } from "./graph-view.js";
-import { el, renderLegend, renderMatrix, renderMetrics, renderPlan, renderResources, renderTimes, stepText } from "./panels.js";
+import { batchText, el, renderMatrix, renderPlan, renderResources, renderTimes, renderVerdict, stepText } from "./panels.js";
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 const THEME_STORAGE = "grp.theme";
 const PLAY_TOTAL_MS = 9000;                 // la animación completa dura ~9 s
 const PLAY_MIN_MS = 25;
-const PLAY_MAX_MS = 700;
+const PLAY_MAX_MS = 750;
+const ERROR_LINE = /línea (\d+)/;
 
-const state = { layout: "force", view: null, meta: null, busy: false, timer: null };
+const state = {
+  layout: "force", algorithm: "dsatur", view: null, meta: null, busy: false, timer: null, lastRequest: null,
+};
 
 // localStorage puede no existir (modo privado, iframes): toda lectura/escritura va protegida.
 const store = {
@@ -44,7 +47,7 @@ function call(type, payload = {}) {
 function setStatus(text, kind) {
   const pill = $("#status");
   pill.textContent = text;
-  pill.className = `pill pill-${kind}`;
+  pill.className = `status status-${kind}`;
 }
 
 function alertBox(text, kind) {
@@ -56,25 +59,47 @@ function selectTab(groupAttr, value, paneAttr) {
   if (paneAttr) $$(`[${paneAttr}]`).forEach((p) => { p.hidden = p.getAttribute(paneAttr) !== value; });
 }
 
-const inspect = (text) => { $("#inspector").textContent = text; };
-const graph = new GraphView($("#cy"), inspect);
+function checkRadio(groupAttr, value) {
+  $$(`[${groupAttr}]`).forEach((b) => b.setAttribute("aria-checked", String(b.getAttribute(groupAttr) === value)));
+}
+
+const narrate = (text) => { $("#inspector").textContent = text; };
+const graph = new GraphView($("#cy"), narrate);
+
+// ------------------------------------------------------------------------------- editor
+function syncGutter(errorLine = null) {
+  const lines = $("#problem").value.split("\n").length;
+  const gutter = $("#gutter");
+  if (gutter.childElementCount !== lines || errorLine !== null || gutter.querySelector(".err")) {
+    gutter.replaceChildren(...Array.from({ length: lines }, (_, i) => el("span", i + 1 === errorLine ? "err" : "", String(i + 1))));
+  }
+  gutter.scrollTop = $("#problem").scrollTop;
+}
 
 // ----------------------------------------------------------------------------- análisis
 function setBusy(busy) {
   state.busy = busy;
   ["#run", "#run-random", "#example"].forEach((sel) => { $(sel).disabled = busy; });
-  $$("[data-n]").forEach((chip) => { chip.disabled = busy; });
+  $$("[data-n]").forEach((b) => { b.disabled = busy; });
   $("#run").textContent = busy ? "Calculando…" : "Asignar lotes";
 }
 
 async function analyze(request) {
   if (state.busy || !state.meta) return;            // Python cargando o un análisis en curso
   $("#alerts").replaceChildren();
+  state.lastRequest = request;
   setBusy(true);
   setStatus("Calculando…", "loading");
   try {
-    const { result } = await call("analyze", { request: { ...request, algorithm: $("#algorithm").value } });
-    if (result.ok) await showView(result.view); else alertBox(result.error, "error");
+    const { result } = await call("analyze", { request: { ...request, algorithm: state.algorithm } });
+    if (result.ok) {
+      syncGutter();
+      await showView(result.view);
+    } else {
+      alertBox(result.error, "error");
+      const line = ERROR_LINE.exec(result.error);
+      if (request.mode === "text" && line) syncGutter(Number(line[1]));
+    }
     setStatus("Listo", "ready");
   } catch (err) {
     alertBox(err.message, "error");
@@ -85,9 +110,9 @@ async function analyze(request) {
 }
 
 function analyzeText() {
-  if (state.busy || !state.meta) return;            // Python cargando o un análisis en curso
+  if (state.busy || !state.meta) return;
   const text = $("#problem").value;
-  if (!text.trim()) { alertBox("Escriba al menos una tarea.", "error"); return; }
+  if (!text.trim()) { alertBox("Escriba al menos una tarea, una por línea.", "error"); return; }
   if (text.length > state.meta.limits.max_text_chars) {
     alertBox(`El texto excede ${state.meta.limits.max_text_chars} caracteres.`, "error");
     return;
@@ -109,25 +134,33 @@ function analyzeRandom() {
 }
 
 // -------------------------------------------------------------------------------- resultados
+function focusBatch(batch) {
+  graph.setBatchFocus(batch);
+  narrate(batch === null ? stepText(state.view, Number($("#step").value)) : batchText(state.view, batch));
+}
+
 async function showView(view) {
   stopPlaying();
   state.view = view;
-  $("#empty").hidden = true;
+  $("#loading").hidden = true;
   $("#output").hidden = false;
-  renderMetrics($("#metrics"), view);
+  renderVerdict(view, focusBatch);
   renderPlan($("#plan"), view);
   renderResources($("#resources"), view);
   renderMatrix($("#matrix"), view);
   renderTimes($("#times"), view);
-  renderLegend($("#legend"), view);
   const tooBigForForce = view.tasks.length > FORCE_MAX_NODES;
-  $("[data-layout=force]").disabled = tooBigForForce;
-  $("[data-layout=force]").title = tooBigForForce ? `Disponible hasta ${FORCE_MAX_NODES} tareas` : "";
+  const forceButton = $("[data-layout=force]");
+  forceButton.disabled = tooBigForForce;
+  forceButton.title = tooBigForForce ? `Disponible hasta ${FORCE_MAX_NODES} tareas` : "";
   if (tooBigForForce) setLayout("batches", false);
   const slider = $("#step");
   slider.max = String(view.steps.length);
   slider.value = slider.max;
   $("#clique").checked = false;
+  $("#clique").disabled = view.clique.length < 2;
+  graph.clique = false;
+  graph.focusBatch = null;
   await drawGraph();
 }
 
@@ -135,32 +168,38 @@ async function drawGraph() {
   const view = state.view;
   $("#no-draw").hidden = view.drawable;
   $("#cy").hidden = !view.drawable;
-  $(".stepper").hidden = !view.drawable;
-  if (!view.drawable) { graph.clear(); inspect(""); return; }
+  $("#stepper").hidden = !view.drawable;
+  if (!view.drawable) { graph.clear(); narrate(""); return; }
   await graph.render(view, state.layout);
-  graph.setClique($("#clique").checked);
   showStep(Number($("#step").value));
 }
 
 function showStep(k) {
-  const view = state.view;
   graph.setStep(k);
-  $("#step-label").textContent = `Paso ${k}/${view.steps.length}`;
-  inspect(stepText(view, k));
+  $("#step-label").textContent = `Paso ${k}/${state.view.steps.length}`;
+  narrate(stepText(state.view, k));
 }
 
 function setLayout(layout, redraw = true) {
   state.layout = layout;
-  selectTab("data-layout", layout);
+  checkRadio("data-layout", layout);
   if (redraw && state.view) drawGraph();
+}
+
+function setAlgorithm(algorithm) {
+  if (state.busy || algorithm === state.algorithm) return;
+  state.algorithm = algorithm;
+  checkRadio("data-algorithm", algorithm);
+  if (state.lastRequest) analyze(state.lastRequest);   // recalcula lo que está en pantalla
 }
 
 // --------------------------------------------------------------------------- paso a paso
 function stopPlaying() {
   if (state.timer) clearInterval(state.timer);
   state.timer = null;
-  $("#step-play").textContent = "▶";
-  $("#step-play").setAttribute("aria-label", "Reproducir");
+  const play = $("#step-play");
+  play.classList.remove("playing");
+  play.setAttribute("aria-label", "Reproducir el algoritmo");
 }
 
 function togglePlay() {
@@ -169,8 +208,9 @@ function togglePlay() {
   const n = Number(slider.max);
   if (Number(slider.value) >= n) slider.value = "0";
   const delay = Math.min(PLAY_MAX_MS, Math.max(PLAY_MIN_MS, PLAY_TOTAL_MS / Math.max(n, 1)));
-  $("#step-play").textContent = "⏸";
-  $("#step-play").setAttribute("aria-label", "Pausar");
+  const play = $("#step-play");
+  play.classList.add("playing");
+  play.setAttribute("aria-label", "Pausar");
   showStep(Number(slider.value));
   state.timer = setInterval(() => {
     const k = Number(slider.value) + 1;
@@ -183,19 +223,22 @@ function togglePlay() {
 // ------------------------------------------------------------------------------- eventos
 function bindEvents() {
   $$("[data-layout]").forEach((b) => b.addEventListener("click", () => { if (!b.disabled) setLayout(b.dataset.layout); }));
+  $$("[data-algorithm]").forEach((b) => b.addEventListener("click", () => setAlgorithm(b.dataset.algorithm)));
   $$("[data-tab]").forEach((b) => b.addEventListener("click", () => selectTab("data-tab", b.dataset.tab, "data-tabpane")));
-  $$("[data-n]").forEach((c) => c.addEventListener("click", () => {
-    $("#rand-n").value = c.dataset.n;
-    $("#rand-p").value = c.dataset.p;
+  $$("[data-n]").forEach((b) => b.addEventListener("click", () => {
+    $("#rand-n").value = b.dataset.n;
+    $("#rand-p").value = b.dataset.p;
     analyzeRandom();
   }));
   $("#example").addEventListener("change", () => {
     const ex = state.meta.examples.find((e) => e.key === $("#example").value);
-    if (ex) { $("#problem").value = ex.text; analyzeText(); }
+    if (ex) { $("#problem").value = ex.text; $("#problem").scrollTop = 0; syncGutter(); analyzeText(); }
   });
   $("#run").addEventListener("click", analyzeText);
   $("#run-random").addEventListener("click", analyzeRandom);
   $("#problem").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) analyzeText(); });
+  $("#problem").addEventListener("input", () => syncGutter());
+  $("#problem").addEventListener("scroll", () => { $("#gutter").scrollTop = $("#problem").scrollTop; });
   $("#step").addEventListener("input", (e) => { stopPlaying(); showStep(Number(e.target.value)); });
   $("#step-first").addEventListener("click", () => { stopPlaying(); $("#step").value = "0"; showStep(0); });
   $("#step-play").addEventListener("click", togglePlay);
@@ -220,7 +263,7 @@ function toggleTheme() {
   const next = current === "dark" ? "light" : "dark";
   root.dataset.theme = next;
   store.set(THEME_STORAGE, next);
-  if (state.view) drawGraph();                     // los colores del grafo salen de las variables CSS
+  if (state.view?.drawable) drawGraph();           // los colores del grafo salen de las variables CSS
 }
 
 // ---------------------------------------------------------------------------------- inicio
@@ -228,6 +271,7 @@ async function main() {
   const theme = store.get(THEME_STORAGE);
   if (theme) document.documentElement.dataset.theme = theme;
   bindEvents();
+  syncGutter();
   try {
     const { meta, version } = await call("init");
     state.meta = meta;
@@ -237,12 +281,14 @@ async function main() {
       return o;
     }));
     $("#problem").value = meta.examples[0]?.text || "";
+    syncGutter();
     $("#build-version").textContent = `código Python ${version}`;
     setStatus("Python listo", "ready");
     setBusy(false);
     analyzeText();
   } catch (err) {
     setStatus("No se pudo iniciar Python", "error");
+    $("#loading").hidden = true;
     alertBox(`No se pudo cargar Pyodide: ${err.message}. Revise la conexión y recargue la página.`, "error");
   }
 }

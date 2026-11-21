@@ -67,12 +67,14 @@ def _wait_idle(page: Page) -> None:
 
 
 def _metric(page: Page, key: str):
-    return page.locator(f".metric[data-metric={key}] .v")
+    return page.locator(f"[data-metric={key}] .v")
 
 
 def test_first_example_runs_on_load_and_shows_batches(page: Page):
-    expect(page.locator("#metrics")).to_contain_text("χ(G) = 4")
+    expect(page.locator("#chi")).to_have_text("χ(G) = 4")
+    expect(page.locator("#claim")).to_contain_text("no se puede hacer mejor")
     expect(_metric(page, "colors")).to_have_text("4")
+    expect(page.locator("#strip .lot")).to_have_count(4)
     expect(page.locator("#plan")).to_contain_text("Lote 4")
     expect(page.locator("#step-label")).to_have_text("Paso 12/12")
     assert page.evaluate("document.querySelectorAll('#cy canvas').length") > 0
@@ -80,37 +82,48 @@ def test_first_example_runs_on_load_and_shows_batches(page: Page):
     assert not page.errors
 
 
+def test_hovering_a_batch_in_the_strip_names_its_tasks(page: Page):
+    page.hover("#strip .lot >> nth=1")
+    expect(page.locator("#inspector")).to_contain_text("Lote 2, de t =")
+    page.mouse.move(5, 5)
+    expect(page.locator("#inspector")).to_contain_text("Listo:")
+
+
 def test_step_by_step_explains_each_decision(page: Page):
     # Arrange
     page.click("#step-first")
-    expect(page.locator("#inspector")).to_contain_text("Paso 0")
+    expect(page.locator("#inspector")).to_contain_text("Ninguna tarea tiene lote")
     # Act
     page.locator("#step").fill("3")
     # Assert
     expect(page.locator("#step-label")).to_have_text("Paso 3/12")
-    expect(page.locator("#inspector")).to_contain_text("DSatur elige la tarea con mayor saturación")
+    expect(page.locator("#inspector")).to_contain_text("DSatur elige la tarea más acorralada")
     _shot(page, "02-paso-a-paso")
     page.click("#step-play")
     expect(page.locator("#step-label")).to_have_text("Paso 12/12", timeout=15_000)
-    expect(page.locator("#inspector")).to_contain_text("Coloración completa")
+    expect(page.locator("#inspector")).to_contain_text("Listo:")
 
 
 def test_corona_example_shows_welsh_powell_uses_more_batches(page: Page):
-    # Arrange
-    page.select_option("#algorithm", "welsh_powell")
+    # Arrange: cambiar de algoritmo recalcula lo que está en pantalla
+    page.click("[data-algorithm=welsh_powell]")
+    _wait_idle(page)
     # Act
     page.select_option("#example", "corona")
     _wait_idle(page)
     # Assert
     expect(_metric(page, "colors")).to_have_text("5")
     expect(_metric(page, "alternative")).to_have_text("2")
-    expect(page.locator("#metrics")).to_contain_text("χ(G) = 2")
+    expect(page.locator("#chi")).to_have_text("χ(G) = 2")
+    expect(page.locator("#claim")).to_contain_text("bastan 2")
     page.click("[data-layout=batches]")
     page.check("#clique")
     _shot(page, "03-corona-por-lotes")
     page.uncheck("#clique")
     page.click("[data-layout=force]")
-    page.select_option("#algorithm", "dsatur")
+    page.click("[data-algorithm=dsatur]")
+    _wait_idle(page)
+    expect(_metric(page, "colors")).to_have_text("2")
 
 
 def test_detail_tabs(page: Page):
@@ -127,10 +140,11 @@ def test_detail_tabs(page: Page):
     _shot(page, "04-examenes-gantt")
 
 
-def test_invalid_text_shows_friendly_error(page: Page):
-    page.fill("#problem", "A: r\nA: s")
+def test_invalid_text_shows_error_and_marks_the_line(page: Page):
+    page.fill("#problem", "A: r\nB: s\nA: t")
     page.click("#run")
     expect(page.locator(".alert-error")).to_contain_text("aparece dos veces")
+    expect(page.locator("#gutter .err")).to_have_text("3")
     _wait_idle(page)
 
 
@@ -139,6 +153,16 @@ def test_stress_1000_nodes_in_the_browser(page: Page):
     _wait_idle(page)
     expect(_metric(page, "tasks")).to_have_text("1000")
     expect(page.locator("[data-layout=force]")).to_be_disabled()
-    expect(page.locator("[data-layout=batches]")).to_have_attribute("aria-selected", "true")
+    expect(page.locator("[data-layout=batches]")).to_have_attribute("aria-checked", "true")
     _shot(page, "05-estres-1000")
+    assert not page.errors
+
+
+def test_dark_theme_renders(page: Page):
+    page.select_option("#example", "microservicios")
+    _wait_idle(page)
+    page.click("#theme-toggle")
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+    _shot(page, "06-pizarra")
+    page.click("#theme-toggle")
     assert not page.errors
