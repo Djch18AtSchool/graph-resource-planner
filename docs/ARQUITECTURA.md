@@ -31,7 +31,7 @@ Sea T el conjunto de tareas y R el de recursos exclusivos; cada tarea t usa un s
 ```mermaid
 flowchart TB
     subgraph Navegador["Navegador del usuario (GitHub Pages, sitio estático)"]
-      UI["visualization/web<br/>index.html · app.js · panels.js · graph-view.js (Cytoscape)"]
+      UI["web/ (React + TypeScript)<br/>Tareas → Conflictos → Plan<br/>React Flow · CodeMirror · Tailwind"]
       subgraph Worker["Web Worker"]
         PY["Pyodide (CPython → WebAssembly)<br/>graph_core · visualization.web_api"]
       end
@@ -42,7 +42,7 @@ flowchart TB
       ST["benchmarks/stress.py"] --> GC
     end
     subgraph CI["GitHub Actions"]
-      TEST["pytest + cobertura"] --> E2E["Playwright (Chromium + Pyodide)"] --> DEP["deploy-pages"]
+      TEST["pytest + Vitest + build"] --> E2E["Playwright (Chromium + Pyodide)"] --> DEP["deploy-pages"]
     end
 ```
 
@@ -61,7 +61,7 @@ flowchart TD
     LB --> PL
     EX --> PL
     PL --> VM["view_model.build_view → JSON"]
-    VM --> WEB["web: grafo, paso a paso, Gantt, recursos, matriz"]
+    VM --> WEB["web: editor, grafo paso a paso, plan por etapas, cronograma, matriz"]
     PL --> CLI["CLI: resumen, plan.json, grafo.png"]
 ```
 
@@ -148,7 +148,9 @@ Corrida incluida: CPython 3.12, una sola máquina; mejor de 3 ejecuciones, tiemp
 
 ## 5. Verificación de calidad
 
-* 90+ pruebas automáticas (`uv run pytest --cov`, ~95 % de cobertura) y 6 pruebas E2E en Chromium con Pyodide.
+* 100+ pruebas del motor (`uv run pytest --cov`, ~95 % de cobertura), pruebas de la lógica de la interfaz con
+  Vitest (verifican contra la salida real de Python que la tabla de decisiones coincide con el algoritmo en cada
+  paso) y 7 pruebas E2E en Chromium con Pyodide.
 * Propiedades verificadas:
   * Toda coloración es propia.
   * Los lotes particionan las tareas.

@@ -1,12 +1,12 @@
 """
-Construye el sitio estatico (GitHub Pages) de la app web.
+Empaqueta el motor en Python para la app web (Pyodide).
 
-    uv run python -m scripts.build_web            # -> dist/
-    uv run python -m scripts.build_web --serve    # construye y sirve en http://localhost:8000
+    uv run python -m scripts.build_web --out web/public/py
 
-El sitio = archivos de ``visualization/web/`` + ``py/bundle.zip`` con el MISMO codigo Python del
-repositorio (graph_core, los ejemplos y la parte web de visualization), que Pyodide descomprime
-y ejecuta en el navegador. No hay una "copia" del algoritmo en JavaScript: es un unico codigo fuente.
+Escribe ``bundle.zip`` con el MISMO codigo Python del repositorio (graph_core, los ejemplos y la API web de
+visualization) y ``manifest.json`` con su hash. La interfaz (``web/``, React + TypeScript) descarga el zip,
+Pyodide lo descomprime en el navegador y lo ejecuta dentro de un Web Worker: el algoritmo no se reescribe en
+JavaScript.
 """
 from __future__ import annotations
 
@@ -14,18 +14,18 @@ import argparse
 import hashlib
 import http.server
 import json
-import shutil
 import zipfile
 from functools import partial
 from pathlib import Path
 from typing import Iterable, List
 
 ROOT = Path(__file__).resolve().parent.parent
-WEB_SRC = ROOT / "visualization" / "web"
+DEFAULT_OUT = ROOT / "web" / "public" / "py"
 PY_PACKAGES = ("graph_core",)
 PY_FILES = ("visualization/__init__.py", "visualization/examples.py", "visualization/view_model.py",
             "visualization/web_api.py")
 DATA_GLOBS = ("examples/*.txt",)
+ZIP_DATE = (2026, 1, 1, 0, 0, 0)            # fecha fija: el zip (y su hash) solo cambia si cambia el codigo
 DEFAULT_PORT = 8000
 
 
@@ -45,24 +45,19 @@ def write_bundle(files: Iterable[Path], target: Path, root: Path = ROOT) -> str:
     target.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in files:
-            info = zipfile.ZipInfo(f.relative_to(root).as_posix(), date_time=(2026, 1, 1, 0, 0, 0))
-            zf.writestr(info, f.read_bytes())
+            zf.writestr(zipfile.ZipInfo(f.relative_to(root).as_posix(), date_time=ZIP_DATE), f.read_bytes())
     return hashlib.sha256(target.read_bytes()).hexdigest()[:12]
 
 
-def build(out: Path = ROOT / "dist") -> Path:
-    if not WEB_SRC.is_dir():
-        raise FileNotFoundError(f"No existe {WEB_SRC}")
-    if out.exists():
-        shutil.rmtree(out)
-    shutil.copytree(WEB_SRC, out)
-    version = write_bundle(python_sources(), out / "py" / "bundle.zip")
-    (out / "py" / "manifest.json").write_text(json.dumps({"version": version}), encoding="utf-8")
-    (out / ".nojekyll").write_text("", encoding="utf-8")       # Pages sirve los archivos tal cual
+def build(out: Path = DEFAULT_OUT) -> Path:
+    """Escribe ``bundle.zip`` y ``manifest.json`` en ``out`` y devuelve esa carpeta."""
+    version = write_bundle(python_sources(), out / "bundle.zip")
+    (out / "manifest.json").write_text(json.dumps({"version": version}), encoding="utf-8")
     return out
 
 
 def serve(site: Path, port: int = DEFAULT_PORT) -> None:
+    """Sirve una carpeta estatica (por ejemplo ``web/dist``) en http://localhost:PORT."""
     handler = partial(http.server.SimpleHTTPRequestHandler, directory=str(site))
     handler.func.extensions_map = {**handler.func.extensions_map, ".mjs": "text/javascript",
                                    ".js": "text/javascript", ".wasm": "application/wasm"}
@@ -76,14 +71,10 @@ def serve(site: Path, port: int = DEFAULT_PORT) -> None:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", default=str(ROOT / "dist"))
-    ap.add_argument("--serve", action="store_true")
-    ap.add_argument("--port", type=int, default=DEFAULT_PORT)
+    ap.add_argument("--out", default=str(DEFAULT_OUT))
     args = ap.parse_args(argv)
-    site = build(Path(args.out))
-    print(f"Sitio construido en {site}")
-    if args.serve:
-        serve(site, args.port)
+    out = build(Path(args.out))
+    print(f"Motor Python empaquetado en {out}")
     return 0
 
 

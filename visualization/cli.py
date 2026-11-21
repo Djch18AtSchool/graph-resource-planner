@@ -108,10 +108,17 @@ def cmd_random(args) -> int:
 
 
 def cmd_web(args) -> int:
-    from scripts.build_web import build, serve
-    site = build(ROOT / "dist")
-    print(f"Sitio construido en {site}")
-    serve(site, args.port)
+    """Construye la app web (React + motor Python empaquetado) con pnpm y la sirve en localhost."""
+    import shutil
+    import subprocess
+    from scripts.build_web import serve
+    if not shutil.which("pnpm"):
+        print("Error: hace falta pnpm (https://pnpm.io) para construir la interfaz web.", file=sys.stderr)
+        return 1
+    web = ROOT / "web"
+    subprocess.run(["pnpm", "install", "--frozen-lockfile"], cwd=web, check=True)
+    subprocess.run(["pnpm", "run", "build"], cwd=web, check=True)
+    serve(web / "dist", args.port)
     return 0
 
 

@@ -1,16 +1,20 @@
 """
-Prueba E2E de la app web: Chromium real + Pyodide ejecutando el codigo Python del repositorio.
+Prueba E2E de la app web (React + TypeScript) con el motor en Python corriendo en Pyodide.
 
+    pnpm --dir web build                                   # genera web/dist (incluye el motor empaquetado)
     uv run --group e2e pytest -m e2e                       # usa Google Chrome del sistema
     E2E_BROWSER_CHANNEL=chromium uv run --group e2e pytest -m e2e
     E2E_SCREENSHOTS=/ruta uv run --group e2e pytest -m e2e   # guarda capturas
 
-Requiere red (descarga Pyodide y Cytoscape de los CDN).
+Si web/dist no existe, la prueba lo construye con pnpm. Requiere red (descarga Pyodide del CDN).
 """
 from __future__ import annotations
 
 import http.server
 import os
+import re
+import shutil
+import subprocess
 import threading
 from functools import partial
 from pathlib import Path
@@ -20,20 +24,27 @@ import pytest
 pytest.importorskip("playwright")
 from playwright.sync_api import Page, expect, sync_playwright  # noqa: E402
 
-from scripts.build_web import build  # noqa: E402
-
 pytestmark = pytest.mark.e2e
-PYODIDE_TIMEOUT_MS = 240_000
-ANALYZE_TIMEOUT_MS = 60_000
+ROOT = Path(__file__).resolve().parents[2]
+SITE = Path(os.getenv("E2E_SITE", ROOT / "web" / "dist"))
+ENGINE_TIMEOUT_MS = 240_000
+STEP_TIMEOUT_MS = 30_000
+
+
+def _ensure_site() -> Path:
+    if not (SITE / "index.html").exists():
+        if not shutil.which("pnpm"):
+            pytest.skip("No existe web/dist y pnpm no está instalado")
+        subprocess.run(["pnpm", "install", "--frozen-lockfile"], cwd=ROOT / "web", check=True)
+        subprocess.run(["pnpm", "run", "build"], cwd=ROOT / "web", check=True)
+    return SITE
 
 
 @pytest.fixture(scope="module")
-def site_url(tmp_path_factory):
-    site = build(tmp_path_factory.mktemp("site") / "dist")
-    handler = partial(http.server.SimpleHTTPRequestHandler, directory=str(site))
+def site_url():
+    handler = partial(http.server.SimpleHTTPRequestHandler, directory=str(_ensure_site()))
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}/"
     httpd.shutdown()
 
@@ -43,13 +54,11 @@ def page(site_url):
     channel = os.getenv("E2E_BROWSER_CHANNEL", "chrome")
     with sync_playwright() as pw:
         browser = pw.chromium.launch(channel=None if channel == "chromium" else channel)
-        context = browser.new_context(viewport={"width": 1400, "height": 1000})
-        pg = context.new_page()
+        pg = browser.new_page(viewport={"width": 1440, "height": 960})
         pg.errors = []
         pg.on("pageerror", lambda exc: pg.errors.append(str(exc)))
         pg.goto(site_url)
-        expect(pg.locator("#output")).to_be_visible(timeout=PYODIDE_TIMEOUT_MS)    # corre el 1er ejemplo
-        expect(pg.locator("#status")).to_have_text("Listo", timeout=ANALYZE_TIMEOUT_MS)
+        expect(pg.get_by_text("Se detectaron")).to_be_visible(timeout=ENGINE_TIMEOUT_MS)
         yield pg
         browser.close()
 
@@ -61,108 +70,88 @@ def _shot(page: Page, name: str) -> None:
         page.screenshot(path=str(Path(folder) / f"{name}.png"), full_page=True)
 
 
-def _wait_idle(page: Page) -> None:
-    expect(page.locator("#run")).to_have_text("Asignar lotes", timeout=ANALYZE_TIMEOUT_MS)
-    expect(page.locator("#status")).to_have_text("Listo", timeout=ANALYZE_TIMEOUT_MS)
+def _step_label(page: Page):
+    return page.get_by_test_id("step-label")
 
 
-def _metric(page: Page, key: str):
-    return page.locator(f"[data-metric={key}] .v")
-
-
-def test_first_example_runs_on_load_and_shows_batches(page: Page):
-    expect(page.locator("#chi")).to_have_text("χ(G) = 4")
-    expect(page.locator("#claim")).to_contain_text("no se puede hacer mejor")
-    expect(_metric(page, "colors")).to_have_text("4")
-    expect(page.locator("#strip .lot")).to_have_count(4)
-    expect(page.locator("#plan")).to_contain_text("Lote 4")
-    expect(page.locator("#step-label")).to_have_text("Paso 12/12")
-    assert page.evaluate("document.querySelectorAll('#cy canvas').length") > 0
-    _shot(page, "01-microservicios")
+def test_step1_recognizes_the_first_example(page: Page):
+    expect(page.get_by_role("heading", name="¿Qué tareas hay que ejecutar?")).to_be_visible()
+    expect(page.get_by_text("12 tareas, 8 recursos")).to_be_visible()
+    expect(page.get_by_text("Se detectaron 19 conflictos entre tareas.")).to_be_visible()
+    _shot(page, "01-tareas")
     assert not page.errors
 
 
-def test_hovering_a_batch_in_the_strip_names_its_tasks(page: Page):
-    page.hover("#strip .lot >> nth=1")
-    expect(page.locator("#inspector")).to_contain_text("Lote 2, de t =")
-    page.mouse.move(5, 5)
-    expect(page.locator("#inspector")).to_contain_text("Listo:")
-
-
-def test_step_by_step_explains_each_decision(page: Page):
+def test_step1_marks_errors_and_blocks_advancing(page: Page):
     # Arrange
-    page.click("#step-first")
-    expect(page.locator("#inspector")).to_contain_text("Ninguna tarea tiene lote")
+    page.locator(".cm-content").click()
+    page.keyboard.press("Control+A")
     # Act
-    page.locator("#step").fill("3")
+    page.keyboard.type("A: r\nA: s")
     # Assert
-    expect(page.locator("#step-label")).to_have_text("Paso 3/12")
-    expect(page.locator("#inspector")).to_contain_text("DSatur elige la tarea más acorralada")
-    _shot(page, "02-paso-a-paso")
-    page.click("#step-play")
-    expect(page.locator("#step-label")).to_have_text("Paso 12/12", timeout=15_000)
-    expect(page.locator("#inspector")).to_contain_text("Listo:")
+    expect(page.get_by_text("Revise la línea 2")).to_be_visible(timeout=STEP_TIMEOUT_MS)
+    expect(page.get_by_role("button", name="Ver conflictos")).to_be_disabled()
+    _shot(page, "02-error")
+    page.get_by_role("button", name=re.compile("E-commerce")).click()
+    expect(page.get_by_role("button", name="Ver conflictos")).to_be_enabled(timeout=STEP_TIMEOUT_MS)
 
 
-def test_corona_example_shows_welsh_powell_uses_more_batches(page: Page):
-    # Arrange: cambiar de algoritmo recalcula lo que está en pantalla
-    page.click("[data-algorithm=welsh_powell]")
-    _wait_idle(page)
-    # Act
-    page.select_option("#example", "corona")
-    _wait_idle(page)
-    # Assert
-    expect(_metric(page, "colors")).to_have_text("5")
-    expect(_metric(page, "alternative")).to_have_text("2")
-    expect(page.locator("#chi")).to_have_text("χ(G) = 2")
-    expect(page.locator("#claim")).to_contain_text("bastan 2")
-    page.click("[data-layout=batches]")
-    page.check("#clique")
-    _shot(page, "03-corona-por-lotes")
-    page.uncheck("#clique")
-    page.click("[data-layout=force]")
-    page.click("[data-algorithm=dsatur]")
-    _wait_idle(page)
-    expect(_metric(page, "colors")).to_have_text("2")
+def test_step2_explains_each_dsatur_decision(page: Page):
+    page.get_by_role("button", name="Ver conflictos").click()
+    expect(_step_label(page)).to_have_text("Paso 0 de 12")
+    for _ in range(3):
+        page.get_by_role("button", name="Paso siguiente").click()
+    expect(_step_label(page)).to_have_text("Paso 3 de 12")
+    expect(page.get_by_text("Era la más acorralada")).to_be_visible()
+    expect(page.get_by_text("siguiente", exact=True)).to_be_visible()
+    _shot(page, "03-paso-a-paso")
+    page.get_by_role("button", name="Reproducir").click()
+    expect(_step_label(page)).to_have_text("Paso 12 de 12", timeout=STEP_TIMEOUT_MS)
+    expect(page.get_by_text("Ninguna línea une dos tareas del mismo color")).to_be_visible()
+    page.get_by_role("radio", name="Agrupado por lote").click()
+    expect(page.locator(".react-flow__node")).to_have_count(12)
+    _shot(page, "04-por-lotes")
 
 
-def test_detail_tabs(page: Page):
-    page.select_option("#example", "examenes")
-    _wait_idle(page)
-    page.click("[data-tab=resources]")
-    expect(page.locator("#resources table")).to_contain_text("K3")
-    page.click("[data-tab=matrix]")
-    expect(page.locator("#matrix table")).to_be_visible()
-    page.click("[data-tab=times]")
-    expect(page.locator("#times")).to_contain_text("Coloración")
-    page.click("[data-tab=plan]")
-    expect(page.locator("#plan .gantt-bar").first).to_be_visible()
-    _shot(page, "04-examenes-gantt")
+def test_step2_matrix_view(page: Page):
+    page.get_by_role("radio", name="Matriz").click()
+    expect(page.get_by_text("A[i][j] = 1")).to_be_visible()
+    page.get_by_role("radio", name="Grafo").click()
 
 
-def test_invalid_text_shows_error_and_marks_the_line(page: Page):
-    page.fill("#problem", "A: r\nB: s\nA: t")
-    page.click("#run")
-    expect(page.locator(".alert-error")).to_contain_text("aparece dos veces")
-    expect(page.locator("#gutter .err")).to_have_text("3")
-    _wait_idle(page)
-
-
-def test_stress_1000_nodes_in_the_browser(page: Page):
-    page.click("[data-n='1000']")
-    _wait_idle(page)
-    expect(_metric(page, "tasks")).to_have_text("1000")
-    expect(page.locator("[data-layout=force]")).to_be_disabled()
-    expect(page.locator("[data-layout=batches]")).to_have_attribute("aria-checked", "true")
-    _shot(page, "05-estres-1000")
+def test_step3_shows_the_plan_as_stages(page: Page):
+    page.get_by_role("button", name="Ver plan").click()
+    expect(page.get_by_test_id("chi")).to_have_text("χ(G) = 4")
+    expect(page.get_by_text("Es el mínimo posible")).to_be_visible()
+    expect(page.get_by_text("Lote 4", exact=True)).to_be_visible()
+    _shot(page, "05-plan")
+    page.get_by_role("radio", name="Cronograma").click()
+    expect(page.get_by_text("Lote 1", exact=False).first).to_be_visible()
     assert not page.errors
 
 
-def test_dark_theme_renders(page: Page):
-    page.select_option("#example", "microservicios")
-    _wait_idle(page)
-    page.click("#theme-toggle")
-    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-    _shot(page, "06-pizarra")
-    page.click("#theme-toggle")
+def test_hard_case_suggests_switching_to_dsatur(page: Page):
+    # Arrange: caso corona con Welsh-Powell
+    page.get_by_role("button", name="Tareas").click()
+    page.get_by_role("button", name=re.compile("Caso difícil")).click()
+    expect(page.get_by_text("Se detectaron 20 conflictos entre tareas.")).to_be_visible(timeout=STEP_TIMEOUT_MS)
+    page.get_by_role("button", name="Ver conflictos").click()
+    page.get_by_role("radio", name="Welsh-Powell").click()
+    expect(page.get_by_text("Welsh-Powell", exact=True).first).to_be_visible()
+    # Act
+    page.get_by_role("button", name="Ver plan").click()
+    # Assert
+    expect(page.get_by_text("Pero bastan 2.")).to_be_visible(timeout=STEP_TIMEOUT_MS)
+    _shot(page, "06-caso-dificil")
+    page.get_by_role("button", name="Usar DSatur").click()
+    expect(page.get_by_text("DSatur agrupa las 10 tareas en 2 lotes.")).to_be_visible(timeout=STEP_TIMEOUT_MS)
+
+
+def test_stress_page_runs_10_100_and_1000(page: Page):
+    page.get_by_role("button", name="Prueba de estrés").click()
+    page.get_by_role("button", name="Ejecutar prueba").click()
+    rows = page.get_by_test_id("stress-table").locator("tbody tr")
+    expect(rows).to_have_count(3, timeout=ENGINE_TIMEOUT_MS)
+    expect(rows.nth(2)).to_contain_text("1000")
+    _shot(page, "07-estres")
     assert not page.errors

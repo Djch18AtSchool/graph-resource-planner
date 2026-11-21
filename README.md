@@ -25,7 +25,7 @@ flowchart LR
     CG --> B["cotas de χ(G)<br/>clique ≤ χ ≤ heurística<br/>χ exacto (branch & bound)"]
     C --> PL["plan por lotes<br/>tiempos · ejecutores"]
     B --> PL
-    PL --> V["visualization<br/>web (Pyodide) · CLI"]
+    PL --> V["web (React + Pyodide)<br/>CLI"]
 ```
 
 ## Qué hace
@@ -48,30 +48,26 @@ flowchart LR
 
 ### La app web
 
-Es un sitio estático (GitHub Pages) que ejecuta **el mismo código Python del repositorio** en el navegador con
-[Pyodide](https://pyodide.org) (CPython compilado a WebAssembly), dentro de un Web Worker. No hay servidor ni una
-copia del algoritmo en JavaScript.
+La interfaz está hecha con **React + TypeScript** (Vite, Tailwind CSS, React Flow, CodeMirror). El motor sigue
+siendo **el mismo código Python del repositorio**: corre en el navegador con [Pyodide](https://pyodide.org)
+(CPython compilado a WebAssembly) dentro de un Web Worker. No hay servidor ni una copia del algoritmo en
+JavaScript, y el sitio es estático (GitHub Pages).
 
-* **Entrada:**
-  * Editor con números de línea, que marca la línea donde hay un error.
-  * 4 ejemplos: despliegue de microservicios, horario de exámenes, plataforma de ML y un caso difícil para
-    Welsh-Powell.
-  * Generador aleatorio G(n, p) para probar con 10, 100 y 1000 nodos.
-  * Cambiar entre DSatur y Welsh-Powell recalcula al instante.
-* **Resultado:** χ(G) escrito como fórmula, con una frase que dice por qué es el mínimo (o entre qué valores
-  está), y una **franja de lotes**: cada color es un lote y su ancho es su duración. Al pasar el cursor por un
-  lote se resaltan sus tareas en el grafo.
-* **Grafo coloreado:** vista libre o **por lotes**. En la vista por lotes cada columna es un color y todas las
-  aristas cruzan entre columnas, lo que muestra que la coloración es válida.
-* **Paso a paso:** un deslizador y ▶ animan el algoritmo y explican cada decisión. En DSatur se muestran la
-  saturación y el grado; en Welsh-Powell, la ronda.
-* **Mostrar la clique** que justifica la cota inferior.
-* **Pestañas:**
-  * Cronograma (diagrama de Gantt).
-  * Recursos (cada recurso es una clique K_k).
-  * Matriz de adyacencia.
-  * Tiempos de cada etapa.
-* Tema claro (papel cuadriculado) y oscuro (pizarra).
+La app guía en tres pasos:
+
+1. **Tareas.** Editor con resaltado del formato y números de línea; a la derecha, la lista de tareas que el motor
+   reconoció. Si hay un error, se marca en su línea. Incluye 4 ejemplos: e-commerce, exámenes finales, machine
+   learning y un caso difícil para Welsh-Powell.
+2. **Conflictos.** El grafo de conflictos interactivo. Con **Reproducir** se ve al algoritmo (DSatur o
+   Welsh-Powell) asignar un lote a cada tarea, y un panel explica cada decisión con la tabla que usa el
+   algoritmo: saturación y grado en DSatur, orden por grado y ronda en Welsh-Powell. También tiene la vista
+   «agrupado por lote» y la matriz de adyacencia.
+3. **Plan.** Cuántos lotes hacen falta y por qué es el mínimo (χ(G)), el tiempo total frente al secuencial, los
+   ejecutores necesarios y los lotes como **etapas** (al estilo de un pipeline de CI) o como cronograma. Si el
+   algoritmo elegido no es óptimo, la app lo dice y propone el otro.
+
+Aparte, **Prueba de estrés** colorea grafos aleatorios de 10, 100 y 1000 tareas en el navegador y muestra
+tiempos y lotes de ambos algoritmos.
 
 ### Formato de entrada
 
@@ -94,18 +90,28 @@ uv run python main.py demo                       # ejemplo de microservicios
 uv run python main.py demo corona --algorithm welsh_powell
 uv run python main.py file examples/examenes.txt --out out/examenes --layout batches   # plan.json + grafo.png
 uv run python main.py random --n 1000 --p 0.005  # grafo aleatorio G(n, p)
-uv run python main.py web                        # construye la app web y la sirve en http://localhost:8000
+uv run python main.py web                        # construye la app web (requiere pnpm) y la sirve en :8000
 uv run python main.py stress                     # pruebas de estrés 10 / 100 / 1000 nodos -> results/
+```
+
+## App web en desarrollo (con [pnpm](https://pnpm.io))
+
+```bash
+cd web
+pnpm install
+pnpm dev                                         # empaqueta el motor Python y abre Vite en http://localhost:5173
+pnpm build                                       # sitio estático en web/dist
 ```
 
 ## Pruebas
 
 ```bash
-uv run pytest --cov                              # 90+ pruebas unitarias y de integración (~95 % de cobertura)
-uv run --group e2e pytest -m e2e                 # E2E: Chromium real cargando Pyodide y usando la app
+uv run pytest --cov                              # 100+ pruebas del motor en Python (~95 % de cobertura)
+pnpm --dir web test                              # pruebas de la lógica de la interfaz (Vitest)
+uv run --group e2e pytest -m e2e                 # E2E: Chromium real con la app completa y Pyodide
 ```
 
-El flujo de GitHub Actions (`.github/workflows/pages.yml`) corre ambas suites en cada *push* y, si pasan,
+El flujo de GitHub Actions (`.github/workflows/pages.yml`) corre las tres suites en cada *push* y, si pasan,
 publica el sitio en GitHub Pages.
 
 ## Estructura
@@ -113,9 +119,10 @@ publica el sitio en GitHub Pages.
 | Carpeta | Contenido |
 |---|---|
 | `graph_core/` | `graph.py`: `Graph` con lista y matriz.<br>`coloring.py`: DSatur, Welsh-Powell, cotas y χ exacto.<br>`problem.py`: tareas y formato de texto.<br>`scheduling.py`: grafo de conflictos y plan por lotes.<br>`generators.py`: grafos de prueba. |
-| `visualization/` | `web/`: HTML, CSS, JS y Web Worker.<br>`web_api.py` y `view_model.py`: puente Python ↔ web.<br>`cli.py`.<br>`plotting.py`: matplotlib. |
+| `visualization/` | `web_api.py` y `view_model.py`: la API que la web llama dentro de Pyodide.<br>`cli.py`.<br>`plotting.py`: matplotlib. |
+| `web/` | Interfaz en React + TypeScript: `src/steps/` (los tres pasos y la prueba de estrés), `src/components/` (grafo, editor, reproductor), `src/engine/` (Web Worker con Pyodide), `src/lib/` (lógica probada con Vitest). |
 | `benchmarks/stress.py` | Pruebas de estrés (CSV, JSON y PNG en `results/`). |
-| `scripts/build_web.py` | Empaqueta el código Python y la web en `dist/`, que es lo que se publica. |
+| `scripts/build_web.py` | Empaqueta el motor Python (`bundle.zip`) que descarga la web. |
 | `examples/` | Problemas de ejemplo en formato de texto. |
 | `docs/ARQUITECTURA.md` | Complejidad, arquitectura y pruebas de estrés para el documento PDF. |
 | `tests/` | pytest, con las pruebas de navegador en `tests/e2e`. |
@@ -136,7 +143,8 @@ publica el sitio en GitHub Pages.
   dependencias de orden entre tareas.
 * La coloración minimiza el número de lotes, no el tiempo total: con duraciones distintas, el mínimo de lotes
   no siempre da el menor tiempo (coloración ponderada).
-* La primera carga de la web descarga Pyodide (~10 MB, luego queda en caché del navegador).
+* La primera carga de la web descarga Pyodide (~10 MB, luego queda en caché del navegador); mientras tanto, el
+  editor ya funciona y la lista de tareas muestra que el motor se está preparando.
 
 ## Integrantes (Grupo 2)
 

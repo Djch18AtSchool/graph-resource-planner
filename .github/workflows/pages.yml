@@ -21,16 +21,33 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.0
         with:
           enable-cache: true
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
       - name: Instalar dependencias
-        run: uv sync --locked
-      - name: Pruebas unitarias e integracion (cobertura minima 80%)
+        run: |
+          uv sync --locked
+          pnpm --dir web install --frozen-lockfile
+      - name: Pruebas del motor en Python (cobertura minima 80%)
         run: uv run pytest --cov --cov-fail-under=80
-      - name: Construir el sitio
-        run: uv run python -m scripts.build_web --out dist
+      - name: Pruebas de la interfaz (Vitest)
+        run: pnpm --dir web test
+      - name: Construir el sitio (React + motor Python empaquetado)
+        run: pnpm --dir web build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: site
+          path: web/dist
+          include-hidden-files: true
       - uses: actions/upload-pages-artifact@v5
         if: github.event_name != 'pull_request'
         with:
-          path: dist
+          path: web/dist
 
   e2e:
     runs-on: ubuntu-latest
@@ -40,6 +57,10 @@ jobs:
       - uses: astral-sh/setup-uv@v10.0.0
         with:
           enable-cache: true
+      - uses: actions/download-artifact@v8
+        with:
+          name: site
+          path: web/dist
       - name: Instalar dependencias y Chromium
         run: |
           uv sync --locked --group e2e

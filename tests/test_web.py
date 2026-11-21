@@ -102,13 +102,17 @@ def test_handle_rejects_non_object_and_hides_unexpected_errors():
 
 
 # --------------------------------------------------------------------------- build web
-def test_build_creates_static_site_with_python_bundle(tmp_path):
-    site = build(tmp_path / "dist")
-    for name in ("index.html", "app.js", "worker.js", "styles.css", ".nojekyll", "py/manifest.json"):
-        assert (site / name).exists()
-    names = set(zipfile.ZipFile(site / "py" / "bundle.zip").namelist())
+def test_build_writes_python_bundle_and_manifest(tmp_path):
+    out = build(tmp_path / "py")
+    names = set(zipfile.ZipFile(out / "bundle.zip").namelist())
     assert {"graph_core/coloring.py", "graph_core/scheduling.py", "visualization/web_api.py",
             "examples/corona.txt"} <= names
     assert not any("tests/" in n or "cli.py" in n or "plotting.py" in n for n in names)
-    assert json.loads((site / "py" / "manifest.json").read_text())["version"]
+    assert json.loads((out / "manifest.json").read_text())["version"]
     assert all(p.suffix in {".py", ".txt"} for p in python_sources())
+
+
+def test_bundle_is_deterministic(tmp_path):
+    a = json.loads((build(tmp_path / "a") / "manifest.json").read_text())["version"]
+    b = json.loads((build(tmp_path / "b") / "manifest.json").read_text())["version"]
+    assert a == b
