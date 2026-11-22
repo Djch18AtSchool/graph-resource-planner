@@ -170,3 +170,26 @@ def test_stress_page_runs_10_100_and_1000(page: Page):
     expect(rows.nth(2)).to_contain_text("1000")
     _shot(page, "07-estres")
     assert not page.errors
+
+
+def test_dragging_a_node_keeps_the_graph_visible(page: Page):
+    # Arrange: grafo del ejemplo E-commerce en el paso 2
+    page.get_by_role("navigation", name="Pasos").get_by_role("button", name="Tareas").click()
+    page.get_by_role("button", name="E-commerce").click()
+    expect(page.get_by_text("Se detectaron 19 conflictos entre tareas.")).to_be_visible(timeout=STEP_TIMEOUT_MS)
+    page.get_by_role("button", name="Ver conflictos").click()
+    node = page.locator(".react-flow__node").first
+    expect(node).to_be_visible()
+    box = node.bounding_box()
+    hidden_count = "() => [...document.querySelectorAll('.react-flow__node')].filter(n => getComputedStyle(n).visibility === 'hidden').length"
+    # Act: arrastrar el nodo en varios pasos, mirando cada cuadro
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    hidden_frames = 0
+    for i in range(1, 13):
+        page.mouse.move(box["x"] + box["width"] / 2 + i * 12, box["y"] + box["height"] / 2 + i * 6)
+        hidden_frames += page.evaluate(hidden_count) > 0
+    page.mouse.up()
+    # Assert: ningún cuadro con vértices ocultos y el nodo se movió
+    assert hidden_frames == 0
+    assert node.bounding_box()["x"] > box["x"] + 60

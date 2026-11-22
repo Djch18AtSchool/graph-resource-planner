@@ -1,11 +1,11 @@
 // Grafo de conflictos interactivo (React Flow). Vértice = tarea; arista = no pueden ir en el mismo lote.
 // El color de cada vértice muestra el lote asignado hasta el paso k del algoritmo.
 import {
-  Background, Controls, Handle, Position, ReactFlow, useInternalNode,
-  type Edge, type EdgeProps, type Node, type NodeChangeset, type NodeProps,
+  Background, Controls, Handle, Position, ReactFlow, useInternalNode, useNodesState,
+  type Edge, type EdgeProps, type Node, type NodeProps,
 } from "@xyflow/react";
 import clsx from "clsx";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import type { PlanView } from "../engine/types";
 import { batchColor, textOnBatch } from "../lib/colors";
 import { colorsAfter } from "../lib/decisions";
@@ -85,24 +85,39 @@ export function ConflictGraph({ view, step, layout, focusBatch = null }: {
 }) {
   // El padre remonta este componente (key) al cambiar de disposición, así fitView ve las posiciones correctas.
   const computed: Layout = useMemo(() => (layout === "batches" ? batchLayout(view) : forceLayout(view)), [view, layout]);
-  const [positions, setPositions] = useState<Layout>(computed);
-  useEffect(() => setPositions(computed), [computed]);
-
   const colors = useMemo(() => colorsAfter(view, step), [view, step]);
   const current = step > 0 && step < view.steps.length ? view.steps[step - 1].task : null;
+  const batchOf = useMemo(() => new Map(view.tasks.map((t) => [t.id, t.batch])), [view]);
 
-  const nodes: TaskNode[] = useMemo(() => view.tasks.map((t) => ({
-    id: t.id,
-    type: "task",
-    position: positions.get(t.id) ?? { x: 0, y: 0 },
-    origin: [0.5, 0.5],
-    data: {
-      label: t.id,
-      batch: colors.get(t.id) ?? null,
-      current: t.id === current,
-      dimmed: focusBatch !== null && t.batch !== focusBatch,
-    },
-  })), [view, positions, colors, current, focusBatch]);
+  const dataFor = (id: string): TaskData => ({
+    label: id,
+    batch: colors.get(id) ?? null,
+    current: id === current,
+    dimmed: focusBatch !== null && batchOf.get(id) !== focusBatch,
+  });
+  const build = (layoutMap: Layout): TaskNode[] => view.tasks.map((t) => ({
+    id: t.id, type: "task", origin: [0.5, 0.5], position: layoutMap.get(t.id) ?? { x: 0, y: 0 }, data: dataFor(t.id),
+  }));
+
+  // Estado controlado con useNodesState: aplica TODOS los cambios de React Flow (posición y también las
+  // dimensiones medidas). Si se descartan las dimensiones, React Flow oculta y vuelve a medir los vértices
+  // en cada cuadro del arrastre y el grafo parpadea.
+  const [nodes, setNodes, onNodesChange] = useNodesState<TaskNode>(build(computed));
+
+  // Otro problema u otra disposición: posiciones nuevas.
+  const builtFrom = useRef(computed);
+  useEffect(() => {
+    if (builtFrom.current === computed) return;
+    builtFrom.current = computed;
+    setNodes(build(computed));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cambiar el layout calculado
+  }, [computed]);
+
+  // Avanza el algoritmo o cambia el lote resaltado: solo cambian los datos; posición y medidas se conservan.
+  useEffect(() => {
+    setNodes((prev) => prev.map((n) => ({ ...n, data: dataFor(n.id) })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dataFor depende de estos valores
+  }, [colors, current, focusBatch, batchOf]);
 
   const edges: ConflictEdgeType[] = useMemo(() => view.conflicts.map((c, i) => ({
     id: `c${i}`,
@@ -117,17 +132,6 @@ export function ConflictGraph({ view, step, layout, focusBatch = null }: {
       dimmed: focusBatch !== null,
     },
   })), [view, current, focusBatch]);
-
-  // React Flow 13 entrega los cambios como un NodeChangeset; solo interesan los arrastres (posición).
-  const onNodesChange = useCallback((changes: NodeChangeset<TaskNode>) => {
-    const moved = changes.getByType("position");
-    if (!moved.length) return;
-    setPositions((prev) => {
-      const next = new Map(prev);
-      moved.forEach((c) => { if (c.position) next.set(c.id, c.position); });
-      return next;
-    });
-  }, []);
 
   return (
     <ReactFlow<TaskNode, ConflictEdgeType>
