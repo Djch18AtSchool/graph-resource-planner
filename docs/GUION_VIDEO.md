@@ -3,22 +3,21 @@
 La consigna pide un video de **5 minutos como máximo** que explique cómo funciona el código, sus ventajas y
 desventajas, y que muestre una demostración. **Todos los integrantes deben participar.**
 
-Este guion prioriza el contenido técnico y matemático. Para que quepa en 5 minutos, las fórmulas van en
-**láminas** (al final de este archivo) que se muestran en pantalla mientras se habla. Así la profesora ve la
-matemática completa aunque no se lea en voz alta cada símbolo.
+El texto hablado explica las ideas con palabras simples y nombra los conceptos clave (grafo de conflictos,
+saturación, clique, número cromático, complejidad). El detalle formal va en **láminas** (al final de este
+archivo) que se muestran en pantalla mientras se habla, y en las preguntas de preparación por si la profesora
+quiere profundizar.
 
-Está pensado para **4 integrantes** y dura unos **4 min 40 s** a ritmo de exposición (unas 145 palabras por
-minuto). Las frases marcadas con **[opcional]** se pueden cortar si el ensayo pasa de 5 minutos. Si son 3
-integrantes, la parte 4 se divide: el integrante 2 dice el bloque «Tiempo» y el integrante 3 dice «Calidad» y
-«Memoria».
+Está pensado para **4 integrantes** y dura unos **4 min 20 s** a ritmo normal, así que deja margen. Si son 3,
+la parte 4 la dicen entre el integrante 2 (tiempo y memoria) y el integrante 3 (calidad y Pyodide).
 
 | Parte | Quién | Tiempo | Tema | Lámina |
 |---|---|---|---|---|
-| 1 | Integrante 1 | 0:00 – 0:45 | Modelo formal: grafo de conflictos y número cromático | 1 |
-| 2 | Integrante 2 | 0:45 – 1:55 | Representación, construcción del grafo, DSatur y Welsh-Powell con su complejidad | 2 |
-| 3 | Integrante 3 | 1:55 – 3:05 | Demostración: paso a paso, cotas de χ(G), optimalidad y plan | 3 |
-| 4 | Integrante 4 | 3:05 – 4:05 | Pruebas de estrés como evidencia de la teoría | 4 |
-| 5 | Todos | 4:05 – 4:40 | Ventajas, desventajas y cierre | — |
+| 1 | Integrante 1 | 0:00 – 0:55 | El problema y el modelo con grafos | 1 |
+| 2 | Integrante 2 | 0:55 – 1:50 | Cómo se guarda el grafo y cómo trabajan DSatur y Welsh-Powell | 2 |
+| 3 | Integrante 3 | 1:50 – 2:50 | Demostración: paso a paso, por qué 4 lotes es el mínimo y el plan | 3 |
+| 4 | Integrante 4 | 2:50 – 3:40 | Pruebas de estrés: qué muestran los resultados | 4 |
+| 5 | Todos | 3:40 – 4:20 | Ventajas, desventajas y cierre | — |
 
 ## Antes de grabar
 
@@ -27,106 +26,103 @@ integrantes, la parte 4 se divide: el integrante 2 dice el bloque «Tiempo» y e
 * Preparar las 4 láminas del final (Google Slides, PowerPoint o una captura de este archivo en GitHub).
 * Abrir en VS Code las líneas de la parte 2 y las imágenes `results/stress_times.png`,
   `results/stress_colors.png` y `results/stress_memory.png`.
-* Ensayar con cronómetro. Si pasa de 5:00, cortar primero las frases **[opcional]**.
+* Ensayar una vez con cronómetro.
 
 ---
 
-## Parte 1 · Modelo formal (Integrante 1, ~45 s)
+## Parte 1 · El problema y el modelo (Integrante 1, ~55 s)
 
-**En pantalla:** la app en blanco; tocar la pill **E-commerce** al final. Mientras se habla del modelo,
-**Lámina 1**.
+**En pantalla:** la app en blanco; **Lámina 1** mientras se explica el modelo; al final, tocar la pill
+**E-commerce**.
 
-> Somos el grupo 2 y desarrollamos el Módulo 2: coloración de vértices para asignar recursos.
+> Somos el grupo 2 y nos tocó el Módulo 2: coloración de grafos para asignar recursos.
 >
-> Cada tarea usa recursos exclusivos. Construimos el grafo de conflictos G = (T, E): dos tareas son adyacentes
-> si comparten un recurso o si se declaró que chocan.
+> El problema es este: un sistema tiene tareas que usan recursos exclusivos, como una base de datos o un disco.
+> Si dos tareas comparten un recurso, no pueden correr al mismo tiempo. ¿Cómo las agrupamos en la menor cantidad
+> de lotes paralelos?
 >
-> Una coloración propia asigna colores de modo que los extremos de toda arista tengan colores distintos. Cada
-> clase de color es un conjunto independiente: un lote que corre en paralelo. Buscamos el mínimo de colores, el
-> número cromático χ(G); decidir si χ(G) ≤ k es NP-completo para k ≥ 3.
+> Lo modelamos con un grafo de conflictos: cada tarea es un vértice, y dos tareas se unen con una arista si
+> comparten un recurso. Colorear el grafo es asignar lotes: dos vecinos nunca comparten color, así que cada color
+> es un grupo de tareas que pueden correr juntas. El mínimo de colores posible es el número cromático, χ(G), y
+> calcularlo es un problema NP-difícil.
 >
 > En este ejemplo, el motor leyó 12 tareas y encontró 19 conflictos.
 
-## Parte 2 · Representación y algoritmos (Integrante 2, ~70 s)
+## Parte 2 · El motor (Integrante 2, ~55 s)
 
-**En pantalla:** VS Code, en este orden, con la **Lámina 2** al final.
+**En pantalla:** VS Code y, al final, la **Lámina 2**.
 
 1. `graph_core/graph.py` líneas 47 y 51 (`_adj` y `_matrix`)
-2. `graph_core/scheduling.py` línea 41 (las cliques por recurso)
-3. `graph_core/coloring.py` línea 89 (el heap de DSatur) y línea 116 (el orden de Welsh-Powell)
+2. `graph_core/coloring.py` línea 89 (el heap de DSatur) y línea 116 (el orden de Welsh-Powell)
 
-> El grafo vive en nuestra clase `Graph`, con dos representaciones sincronizadas: la lista de adyacencia, que
-> ocupa O(V + E), y la matriz, que ocupa O(V²). Los algoritmos recorren vecinos, lo que cuesta O(grado) con la
-> lista y O(V) con la matriz; por eso usan la lista.
+> El grafo se guarda en nuestra clase `Graph`, con lista y matriz de adyacencia. Los algoritmos recorren los
+> vecinos de cada vértice: con la lista eso cuesta O(V + E) en total, y con la matriz costaría O(V²). Por eso
+> trabajan con la lista.
 >
-> Al construir el grafo, cada recurso que usan k tareas aporta una clique K_k.
+> Implementamos dos algoritmos. DSatur colorea primero la tarea más acorralada, la que tiene más colores
+> distintos entre sus vecinos; a eso se le llama saturación. Le da el menor color libre y, gracias a un heap,
+> cuesta O((V + E) log V).
 >
-> DSatur define la saturación de un vértice como la cantidad de colores distintos entre sus vecinos ya
-> coloreados. En cada paso toma el vértice sin color de mayor saturación, desempata por mayor grado y le asigna
-> el menor color libre. Lo implementamos con un heap de entradas perezosas: cada arista genera a lo sumo una
-> inserción, así que cuesta O((V + E) log V).
->
-> Welsh-Powell ordena los vértices por grado decreciente y construye un color a la vez, metiendo en él todo
-> vértice no adyacente a los ya elegidos. Cuesta O(V log V + kV + E). Ambos usan a lo sumo Δ + 1 colores.
+> Welsh-Powell ordena las tareas de más a menos conflictos y llena un color a la vez. Es más simple y algo más
+> rápido, pero depende mucho del orden. Ninguno de los dos usa más de Δ + 1 colores, donde Δ es el grado máximo.
 
-## Parte 3 · Demostración y optimalidad (Integrante 3, ~70 s)
+## Parte 3 · Demostración (Integrante 3, ~60 s)
 
 **En pantalla:** la app con E-commerce.
 
-1. **Ver conflictos** → **Reproducir** a 1×; pausar en el paso 3 y señalar la tabla.
-2. Al terminar, **Agrupado por lote** (sin comentarlo: la imagen habla sola).
-3. **Lámina 3** mientras se explica la cota y el branch & bound.
+1. **Ver conflictos** → **Reproducir** a 1×; pausar un momento y señalar la tabla de la derecha.
+2. Al terminar, **Agrupado por lote**.
+3. **Lámina 3** mientras se explica por qué 4 es el mínimo.
 4. **Ver plan**.
 
-> DSatur empieza por «Reporte de ventas», el vértice de grado máximo, 6. La tabla de la derecha muestra la
-> saturación y el grado de cada candidata.
+> Al reproducir vemos a DSatur trabajar: empieza por la tarea con más conflictos, y la tabla de la derecha
+> muestra la saturación y el grado de cada candidata.
 >
-> Terminó con 4 colores. ¿Es el mínimo? Usamos la cota ω(G) ≤ χ(G): una clique de tamaño ω necesita ω colores
-> distintos. El motor encontró una clique de 4 tareas, así que χ(G) ≥ 4; como DSatur logró 4, χ(G) = 4 y la
-> optimalidad queda demostrada.
+> Terminó con 4 colores. ¿Es el mínimo? Sí, y la app lo demuestra: encontró 4 tareas que chocan todas entre sí,
+> lo que se llama una clique, y una clique de 4 necesita 4 colores distintos. Como DSatur usó 4, no se puede
+> hacer mejor. Cuando esa cota no alcanza, el motor intenta calcular χ(G) exacto con branch and bound en grafos
+> pequeños.
 >
-> La cota no siempre alcanza: el grafo de Grötzsch tiene ω = 2 pero χ = 4. Cuando no coincide, calculamos χ
-> exacto con branch and bound: recorre las asignaciones en el orden de DSatur y poda toda rama que ya usa tantos
-> colores como la mejor solución conocida. **[opcional]** Lo limitamos a componentes de hasta 60 vértices.
+> Si agrupamos por lote, cada columna es un color y ninguna línea queda dentro de una columna.
 >
-> En el plan, cada lote dura lo que su tarea más larga. El tiempo total es la suma de esas duraciones: 100,
-> contra 205 en secuencia. Se necesitan 5 ejecutores, el tamaño de la clase de color más grande.
+> En el plan, cada lote dura lo que su tarea más larga: el tiempo total es 100, contra 205 si todo fuera en fila,
+> y hacen falta 5 ejecutores.
 
-## Parte 4 · Pruebas de estrés como evidencia (Integrante 4, ~60 s)
+## Parte 4 · Pruebas de estrés (Integrante 4, ~50 s)
 
-**En pantalla:** **Lámina 4** con la tabla; luego `results/stress_times.png`, `results/stress_colors.png` y
-`results/stress_memory.png`, una por bloque. **[opcional]** Al final, la página **Prueba de estrés** de la app
-corriendo los tres tamaños.
+**En pantalla:** **Lámina 4**; luego `results/stress_times.png` y `results/stress_memory.png`; al final, la
+página **Prueba de estrés** de la app corriendo los tres tamaños.
 
-> Coloreamos grafos de 10, 100 y 1000 vértices de cinco familias, y los resultados confirman la teoría.
+> Para las pruebas de estrés coloreamos grafos de 10, 100 y 1000 tareas, y los resultados coinciden con la
+> teoría.
 >
-> **Tiempo.** Al pasar de 100 a 1000 vértices en una triangulación plana, (V + E) log V predice que el tiempo de
-> DSatur se multiplica por 15, y medimos 16. En el grafo aleatorio denso la predicción es 25 y medimos 23.
-> **[opcional]** Con mil vértices, DSatur tarda unos 4 milisegundos.
+> En tiempo: al pasar de 100 a 1000 tareas, la complejidad predice que DSatur tarde unas 15 veces más, y medimos
+> 16. Con mil tareas tarda unos 4 milisegundos.
 >
-> **Calidad.** En la triangulación plana DSatur usa 4 colores, como garantiza el Teorema de los Cuatro Colores,
-> y Welsh-Powell usa 6. En el aleatorio denso, en cambio, la clique encontrada es 4 y DSatur usa 16: queda una
-> brecha que no podemos cerrar, porque el problema es NP-difícil.
+> En calidad: en grafos planos DSatur usa 4 colores, como dice el Teorema de los Cuatro Colores, y Welsh-Powell
+> usa 6. En grafos aleatorios densos queda una brecha entre la cota y el resultado, lo esperable en un problema
+> NP-difícil.
 >
-> **Memoria.** Con 3000 vértices, la lista ocupa 1,1 MB y la matriz 72. Al multiplicar V por 30, la matriz
-> crece 877 veces, casi 30 al cuadrado; la lista, 38 veces.
+> En memoria: con 3000 tareas la lista ocupa 1 MB y la matriz 72.
+>
+> Y todo esto corre en el navegador: el mismo código Python se ejecuta con Pyodide, sin servidor.
 
-## Parte 5 · Ventajas, desventajas y cierre (~35 s, una frase cada uno)
+## Parte 5 · Ventajas, desventajas y cierre (~40 s, una frase cada uno)
 
 **En pantalla:** para la frase del integrante 2: pill **Caso difícil**, en el paso 2 elegir **Welsh-Powell** y
 **Ver plan** («5 lotes. Pero bastan 2»).
 
-> **Integrante 1:** A favor: ambos algoritmos son casi lineales en grafos dispersos, y la app distingue un
-> resultado aproximado de uno demostrado óptimo.
+> **Integrante 1:** A favor: los algoritmos son rápidos, casi lineales, y la app dice cuándo el resultado es el
+> óptimo y no solo una aproximación.
 >
-> **Integrante 2:** En contra: son heurísticas. En este grafo corona, que es bipartito, Welsh-Powell usa 5 lotes
-> por depender del orden; DSatur encuentra 2.
+> **Integrante 2:** En contra: son heurísticas. En este grafo, Welsh-Powell usa 5 lotes cuando bastan 2, porque
+> depende del orden; DSatur encuentra los 2.
 >
-> **Integrante 3:** El modelo supone recursos de capacidad 1 y minimiza lotes, no el tiempo total; eso sería
-> coloración ponderada, también NP-difícil.
+> **Integrante 3:** El modelo también tiene límites: cada recurso lo usa una sola tarea a la vez, y minimizamos la
+> cantidad de lotes, no el tiempo total.
 >
-> **Integrante 4:** En resumen: modelamos la planificación como coloración, implementamos DSatur y Welsh-Powell
-> con su complejidad, y acotamos χ(G) para saber cuándo la respuesta es óptima. Gracias.
+> **Integrante 4:** En resumen: convertimos un problema de planificación en coloración de grafos, con dos
+> algoritmos y cotas que justifican el resultado. Gracias.
 
 ---
 
