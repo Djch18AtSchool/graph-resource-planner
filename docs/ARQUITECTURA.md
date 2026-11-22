@@ -30,39 +30,83 @@ Sea T el conjunto de tareas y R el de recursos exclusivos; cada tarea t usa un s
 
 ```mermaid
 flowchart TB
-    subgraph Navegador["Navegador del usuario (GitHub Pages, sitio estático)"]
-      UI["web/ (React + TypeScript)<br/>Tareas → Conflictos → Plan<br/>React Flow · CodeMirror · Tailwind"]
-      subgraph Worker["Web Worker"]
-        PY["Pyodide (CPython → WebAssembly)<br/>graph_core · visualization.web_api"]
+    subgraph CI["GitHub Actions (cada push a main)"]
+      direction LR
+      T1["pytest: motor Python<br/>Vitest: web/src/lib"] --> B1["pnpm build<br/>build_web.py empaqueta el motor<br/>Vite compila React + TS"]
+      B1 --> E1["Playwright E2E<br/>sobre web/dist"] --> D1["deploy-pages"]
+    end
+    D1 -->|"sitio estático"| GH["GitHub Pages"]
+    GH -->|"HTML, JS, CSS y py/bundle.zip"| UI
+    subgraph Navegador["Navegador del usuario"]
+      UI["Interfaz React + TypeScript<br/>steps/: Tareas, Conflictos, Plan, Prueba de estrés<br/>components/: Editor (CodeMirror), ConflictGraph (React Flow)<br/>lib/: tabla de decisiones, layouts, colores"]
+      subgraph Worker["Web Worker: engine/worker.ts"]
+        PY["Pyodide: CPython en WebAssembly<br/>visualization.web_api + graph_core"]
       end
-      UI <-->|postMessage JSON| PY
+      UI <-->|"postMessage<br/>petición JSON / plan JSON"| PY
     end
-    subgraph Terminal["Terminal (uv run python main.py)"]
-      CLI["visualization/cli.py · plotting.py (matplotlib)"] --> GC["graph_core"]
+    CDN["jsDelivr CDN<br/>runtime de Pyodide"] -.->|"se descarga la primera vez"| PY
+    subgraph Terminal["Terminal: uv run python main.py"]
+      CLI["visualization/cli.py<br/>demo, file, random, web"] --> GC["graph_core"]
+      CLI --> PLOT["plotting.py: grafo.png"]
       ST["benchmarks/stress.py"] --> GC
-    end
-    subgraph CI["GitHub Actions"]
-      TEST["pytest + Vitest + build"] --> E2E["Playwright (Chromium + Pyodide)"] --> DEP["deploy-pages"]
+      ST --> RES["results/: CSV, JSON y gráficas"]
     end
 ```
+
+El mismo paquete `graph_core` corre en los dos entornos: en la terminal con CPython y en el navegador con
+Pyodide. La interfaz no reimplementa ningún algoritmo. Recibe el plan ya calculado (incluida la lista de pasos
+del algoritmo) y solo lo dibuja; la tabla de decisiones de cada paso se reconstruye en `lib/decisions.ts` a
+partir de esos pasos, y las pruebas de Vitest comprueban contra la salida real de Python que coincide.
 
 ### 2.2 Flujo de datos
 
 ```mermaid
 flowchart TD
-    IN["Texto: tareas, duraciones, recursos, conflictos"] --> PR["problem.parse_problem<br/>validación con número de línea"]
-    PR -->|Problem inmutable| CG["scheduling.conflict_graph<br/>Graph: lista + matriz de adyacencia"]
-    CG --> A1["coloring.dsatur"]
-    CG --> A2["coloring.welsh_powell"]
-    CG --> LB["clique voraz + clique por recurso"]
-    CG --> EX["exact_chromatic_number<br/>branch & bound (≤ 60 vértices)"]
-    A1 --> PL["scheduling.plan<br/>lotes, tiempos, ejecutores, cotas"]
-    A2 --> PL
-    LB --> PL
-    EX --> PL
-    PL --> VM["view_model.build_view → JSON"]
-    VM --> WEB["web: editor, grafo paso a paso, plan por etapas, cronograma, matriz"]
-    PL --> CLI["CLI: resumen, plan.json, grafo.png"]
+    IN["Texto del editor"] --> API["web_api.handle<br/>valida la petición JSON"]
+    RND["Prueba de estrés: G(n, p)"] --> API
+    API -->|"modo text"| PR["problem.parse_problem<br/>errores con número de línea"]
+    API -->|"modo random"| RP["generators.random_problem"]
+    PR --> PB["Problem (inmutable)"]
+    RP --> PB
+    PB --> CG["scheduling.conflict_graph<br/>Graph: lista + matriz de adyacencia"]
+    CG --> A1["Algoritmo elegido<br/>coloring.dsatur o welsh_powell"]
+    CG --> A2["El otro algoritmo<br/>para comparar"]
+    CG --> LB["Cota inferior<br/>clique voraz o clique de un recurso"]
+    A1 --> UB["Cota superior<br/>la menor de las dos coloraciones"]
+    A2 --> UB
+    LB --> Q{"¿Inferior = superior?"}
+    UB --> Q
+    Q -->|"sí"| OPT["χ(G) demostrado por la clique"]
+    Q -->|"no"| EX["exact_chromatic_number<br/>branch & bound: componentes ≤ 60 vértices,<br/>200 000 nodos de búsqueda en total"]
+    EX -->|"termina"| OPT2["χ(G) exacto"]
+    EX -->|"excede el límite"| RNG["χ(G) queda entre las cotas"]
+    A1 --> PL["scheduling.plan<br/>lotes con inicio y duración,<br/>tiempo total, ejecutores"]
+    OPT --> PL
+    OPT2 --> PL
+    RNG --> PL
+    PL --> VM["view_model.build_view"]
+    VM -->|"JSON"| WEB["Web: tareas reconocidas, grafo paso a paso,<br/>plan por etapas, cronograma, matriz"]
+    PL --> CLI["CLI: resumen en consola<br/>y grafo.png con matplotlib"]
+    VM -->|"plan.json"| CLI
+```
+
+### 2.3 Secuencia de una petición en la web
+
+```mermaid
+sequenceDiagram
+    actor U as Usuario
+    participant UI as React: state.ts (usePlan)
+    participant W as Web Worker: engine/worker.ts
+    participant P as Python: web_api.handle
+    U->>UI: escribe en el editor o elige un ejemplo
+    Note over UI: espera 300 ms sin cambios (debounce)
+    UI->>W: postMessage({mode: "text", text, algorithm})
+    W->>P: handle(petición JSON)
+    P->>P: parse_problem, plan, build_view
+    P-->>W: {"ok": true, "view": {...}} o {"ok": false, "error": "línea 3: ..."}
+    W-->>UI: resultado
+    UI-->>U: tareas reconocidas o error marcado en su línea
+    Note over UI: Reproducir solo recorre view.steps<br/>y no vuelve a llamar a Python
 ```
 
 **Principios:**

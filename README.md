@@ -21,11 +21,12 @@ Se modela como coloración de vértices:
 flowchart LR
     T["Tareas + recursos<br/>(texto)"] --> P["graph_core.problem<br/>lectura y validación"]
     P --> CG["graph_core.scheduling<br/>grafo de conflictos<br/>(lista + matriz)"]
-    CG --> C["graph_core.coloring<br/>DSatur · Welsh-Powell"]
+    CG --> C["graph_core.coloring<br/>DSatur y Welsh-Powell"]
     CG --> B["cotas de χ(G)<br/>clique ≤ χ ≤ heurística<br/>χ exacto (branch & bound)"]
-    C --> PL["plan por lotes<br/>tiempos · ejecutores"]
+    C --> B
+    C --> PL["graph_core.scheduling.plan<br/>lotes, tiempos y ejecutores"]
     B --> PL
-    PL --> V["web (React + Pyodide)<br/>CLI"]
+    PL --> V["web (React + Pyodide) y CLI"]
 ```
 
 ## Qué hace
@@ -126,6 +127,7 @@ publica el sitio en GitHub Pages.
 | `scripts/build_web.py` | Empaqueta el motor Python (`bundle.zip`) que descarga la web. |
 | `examples/` | Problemas de ejemplo en formato de texto. |
 | `docs/ARQUITECTURA.md` | Complejidad, arquitectura y pruebas de estrés para el documento PDF. |
+| `docs/GUION_VIDEO.md` | Guion del video (≤ 5 min, por integrante) con lo que se dice y lo que se muestra. |
 | `tests/` | pytest, con las pruebas de navegador en `tests/e2e`. |
 
 ## Ventajas y desventajas (para el video)
