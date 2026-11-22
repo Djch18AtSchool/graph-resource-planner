@@ -58,7 +58,7 @@ def page(site_url):
         pg.errors = []
         pg.on("pageerror", lambda exc: pg.errors.append(str(exc)))
         pg.goto(site_url)
-        expect(pg.get_by_text("Se detectaron")).to_be_visible(timeout=ENGINE_TIMEOUT_MS)
+        expect(pg.get_by_role("button", name="E-commerce")).to_be_enabled(timeout=ENGINE_TIMEOUT_MS)
         yield pg
         browser.close()
 
@@ -74,12 +74,27 @@ def _step_label(page: Page):
     return page.get_by_test_id("step-label")
 
 
-def test_step1_recognizes_the_first_example(page: Page):
+def test_step1_starts_blank_with_example_pills(page: Page):
     expect(page.get_by_role("heading", name="¿Qué tareas hay que ejecutar?")).to_be_visible()
+    expect(page.get_by_text("Aquí aparecerán sus tareas")).to_be_visible()
+    expect(page.locator(".cm-placeholder")).to_contain_text("Escriba una tarea por línea")
+    expect(page.get_by_role("button", name="Ver conflictos")).to_be_disabled()
+    _shot(page, "00-en-blanco")
+    page.get_by_role("button", name="E-commerce").click()
     expect(page.get_by_text("12 tareas, 8 recursos")).to_be_visible()
     expect(page.get_by_text("Se detectaron 19 conflictos entre tareas.")).to_be_visible()
     _shot(page, "01-tareas")
     assert not page.errors
+
+
+def test_step_explanation_is_a_popover(page: Page):
+    tip = page.get_by_role("tooltip")
+    expect(tip).to_have_count(0)
+    page.get_by_role("button", name=re.compile("Qué hacer en este paso")).hover()
+    expect(tip).to_contain_text("no pueden ejecutarse al mismo tiempo")
+    _shot(page, "01b-popover")
+    page.mouse.move(5, 5)
+    expect(tip).to_have_count(0)
 
 
 def test_step1_marks_errors_and_blocks_advancing(page: Page):
@@ -92,7 +107,7 @@ def test_step1_marks_errors_and_blocks_advancing(page: Page):
     expect(page.get_by_text("Revise la línea 2")).to_be_visible(timeout=STEP_TIMEOUT_MS)
     expect(page.get_by_role("button", name="Ver conflictos")).to_be_disabled()
     _shot(page, "02-error")
-    page.get_by_role("button", name=re.compile("E-commerce")).click()
+    page.get_by_role("button", name="E-commerce").click()
     expect(page.get_by_role("button", name="Ver conflictos")).to_be_enabled(timeout=STEP_TIMEOUT_MS)
 
 
@@ -133,7 +148,7 @@ def test_step3_shows_the_plan_as_stages(page: Page):
 def test_hard_case_suggests_switching_to_dsatur(page: Page):
     # Arrange: caso corona con Welsh-Powell
     page.get_by_role("button", name="Tareas").click()
-    page.get_by_role("button", name=re.compile("Caso difícil")).click()
+    page.get_by_role("button", name="Caso difícil").click()
     expect(page.get_by_text("Se detectaron 20 conflictos entre tareas.")).to_be_visible(timeout=STEP_TIMEOUT_MS)
     page.get_by_role("button", name="Ver conflictos").click()
     page.get_by_role("radio", name="Welsh-Powell").click()

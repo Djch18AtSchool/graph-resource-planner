@@ -55,9 +55,10 @@ JavaScript, y el sitio es estático (GitHub Pages).
 
 La app guía en tres pasos:
 
-1. **Tareas.** Editor con resaltado del formato y números de línea; a la derecha, la lista de tareas que el motor
-   reconoció. Si hay un error, se marca en su línea. Incluye 4 ejemplos: e-commerce, exámenes finales, machine
-   learning y un caso difícil para Welsh-Powell.
+1. **Tareas.** Empieza en blanco: el editor (con resaltado del formato y números de línea) muestra cómo escribir
+   y, a la derecha, aparece en vivo la lista de tareas que el motor reconoce. Si hay un error, se marca en su
+   línea. Debajo hay ejemplos de un clic: e-commerce, exámenes finales, machine learning y un caso difícil para
+   Welsh-Powell.
 2. **Conflictos.** El grafo de conflictos interactivo. Con **Reproducir** se ve al algoritmo (DSatur o
    Welsh-Powell) asignar un lote a cada tarea, y un panel explica cada decisión con la tabla que usa el
    algoritmo: saturación y grado en DSatur, orden por grado y ronda en Welsh-Powell. También tiene la vista
@@ -66,7 +67,7 @@ La app guía en tres pasos:
    ejecutores necesarios y los lotes como **etapas** (al estilo de un pipeline de CI) o como cronograma. Si el
    algoritmo elegido no es óptimo, la app lo dice y propone el otro.
 
-Aparte, **Prueba de estrés** colorea grafos aleatorios de 10, 100 y 1000 tareas en el navegador y muestra
+La explicación de cada paso está en el ícono ⓘ junto al título. Aparte, **Prueba de estrés** colorea grafos aleatorios de 10, 100 y 1000 tareas en el navegador y muestra
 tiempos y lotes de ambos algoritmos.
 
 ### Formato de entrada

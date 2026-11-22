@@ -35,11 +35,16 @@ export function ConflictsStep({ view, algorithm, setAlgorithm, onBack, onNext }:
 
   return (
     <section>
-      <StepTitle number={2} title="¿Qué tareas chocan entre sí?">
-        Cada línea une dos tareas que comparten un recurso: no pueden ir en el mismo lote. Presione
-        <strong className="font-semibold text-ink"> Reproducir </strong> y vea cómo el algoritmo le asigna un lote (un color) a
-        cada tarea sin que dos vecinas repitan color.
-      </StepTitle>
+      <StepTitle
+        number={2}
+        title="¿Qué tareas chocan entre sí?"
+        info={<>
+          Cada línea une dos tareas que comparten un recurso, así que no pueden ir en el mismo lote. Presione
+          <strong className="font-semibold text-ink"> Reproducir </strong> para ver cómo el algoritmo le asigna un lote (un color)
+          a cada tarea sin que dos vecinas repitan color. El panel de la derecha explica cada decisión. Pase el cursor
+          sobre una línea para ver qué recurso comparten.
+        </>}
+      />
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <Segmented<Algorithm> label="Algoritmo" value={algorithm} onChange={setAlgorithm}

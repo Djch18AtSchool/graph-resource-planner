@@ -45,6 +45,10 @@ export function usePlan(text: string, algorithm: Algorithm, ready: boolean): Pla
   useEffect(() => {
     if (!ready) return;
     const id = ++seq.current;
+    if (!text.trim()) {                       // editor vacío: no es un error, es el estado inicial
+      setState({ view: null, error: null, pending: false });
+      return;
+    }
     setState((s) => ({ ...s, pending: true }));
     const timer = window.setTimeout(async () => {
       try {

@@ -1,6 +1,8 @@
 // Piezas básicas de la interfaz (botones, selector segmentado, tarjeta, chip de color).
 import clsx from "clsx";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { Info } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { useId, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { batchColor } from "../lib/colors";
 
 type Variant = "primary" | "secondary" | "ghost";
@@ -71,12 +73,49 @@ export function ResourceChip({ name }: { name: string }) {
   );
 }
 
-export function StepTitle({ number, title, children }: { number: number; title: string; children?: ReactNode }) {
+/** Ícono ⓘ que muestra una explicación al pasar el cursor, al enfocarlo con el teclado o al tocarlo. */
+export function InfoTip({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
   return (
-    <div className="mb-6 max-w-3xl">
-      <p className="mb-1 text-sm font-medium text-accent">Paso {number} de 3</p>
-      <h1 className="text-[28px] font-semibold leading-tight tracking-tight text-ink">{title}</h1>
-      {children && <p className="mt-2 text-[15px] leading-relaxed text-muted">{children}</p>}
+    <span className="relative inline-flex align-middle" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={open}
+        aria-describedby={open ? id : undefined}
+        onClick={() => setOpen((o) => !o)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
+        className={clsx("grid size-7 place-items-center rounded-full transition-colors", open ? "bg-accent-soft text-accent" : "text-faint hover:text-ink")}
+      >
+        <Info className="size-[18px]" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            id={id}
+            role="tooltip"
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }}
+            className="absolute left-0 top-full z-40 mt-2 w-[min(22rem,80vw)] rounded-xl border border-line bg-surface p-4 text-left text-sm font-normal leading-relaxed tracking-normal text-ink-soft shadow-pop"
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </span>
+  );
+}
+
+export function StepTitle({ number, title, info }: { number?: number; title: string; info?: ReactNode }) {
+  return (
+    <div className="relative z-30 mb-6">
+      {number && <p className="mb-1 text-sm font-medium text-accent">Paso {number} de 3</p>}
+      <h1 className="flex items-center gap-2 text-[28px] font-semibold leading-tight tracking-tight text-ink">
+        {title}
+        {info && <InfoTip label={`Qué hacer en este paso: ${title}`}>{info}</InfoTip>}
+      </h1>
     </div>
   );
 }

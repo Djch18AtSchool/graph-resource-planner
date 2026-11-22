@@ -49,6 +49,8 @@
 .cm-scroller { font-family: var(--font-mono); line-height: 1.75; }
 .cm-gutters { background: var(--color-sunken) !important; border-right: 1px solid var(--color-line) !important; color: var(--color-faint) !important; }
 .cm-activeLineGutter, .cm-activeLine { background: rgb(79 70 229 / 0.05) !important; }
+/* Editor vacío: el texto de ejemplo no debe verse como línea activa */
+.cm-editor:has(.cm-placeholder) .cm-activeLine, .cm-editor:has(.cm-placeholder) .cm-activeLineGutter { background: transparent !important; }
 .cm-lintRange-error { background-image: none !important; text-decoration: underline wavy var(--color-danger); }
 .cm-diagnostic-error { border-left-color: var(--color-danger) !important; }
 .cm-lint-marker-error { content: none; }

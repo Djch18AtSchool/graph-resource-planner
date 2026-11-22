@@ -28,9 +28,10 @@ const highlight = HighlightStyle.define([
   { tag: tags.string, color: TOKEN_COLORS.title },
 ]);
 
-export function Editor({ value, onChange, errorLine, errorMessage }: {
+export function Editor({ value, onChange, errorLine, errorMessage, placeholderText = "" }: {
   value: string;
   onChange: (text: string) => void;
+  placeholderText?: string;
   errorLine: number | null;
   errorMessage: string | null;
 }) {
@@ -47,7 +48,7 @@ export function Editor({ value, onChange, errorLine, errorMessage }: {
         extensions: [
           lineNumbers(), highlightActiveLineGutter(), highlightActiveLine(), history(),
           keymap.of([...defaultKeymap, ...historyKeymap]), taskLanguage, syntaxHighlighting(highlight),
-          placeholder("Respaldo [20]: base_de_datos, disco"),
+          placeholder(placeholderText),
           EditorView.contentAttributes.of({ "aria-label": "Tareas, una por línea" }),
           EditorView.updateListener.of((u) => { if (u.docChanged) onChangeRef.current(u.state.doc.toString()); }),
         ],

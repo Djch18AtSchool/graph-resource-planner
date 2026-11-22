@@ -1,7 +1,7 @@
 // Prueba de estrés: grafos aleatorios de 10, 100 y 1000 tareas, coloreados en el navegador.
 import { Play, LoaderCircle } from "lucide-react";
 import { useState } from "react";
-import { Button, Card, Segmented } from "../components/ui";
+import { Button, Card, Segmented, StepTitle } from "../components/ui";
 import { engine } from "../engine/engine";
 import { num } from "../lib/format";
 
@@ -58,13 +58,13 @@ export function StressPage() {
   const maxMs = Math.max(0.001, ...rows.flatMap((r) => [r.dsaturMs, r.wpMs]));
   return (
     <section>
-      <div className="mb-6 max-w-3xl">
-        <h1 className="text-[28px] font-semibold leading-tight tracking-tight">Prueba de estrés</h1>
-        <p className="mt-2 text-[15px] leading-relaxed text-muted">
-          Genera grafos de conflictos aleatorios de 10, 100 y 1000 tareas y los colorea con los dos algoritmos, aquí mismo
-          en su navegador. Cada tarea choca, en promedio, con la cantidad de tareas que elija.
-        </p>
-      </div>
+      <StepTitle
+        title="Prueba de estrés"
+        info={<>
+          Genera grafos de conflictos aleatorios de 10, 100 y 1000 tareas y los colorea con los dos algoritmos, aquí
+          mismo en su navegador. Cada tarea choca, en promedio, con la cantidad de tareas que elija.
+        </>}
+      />
 
       <Card className="mb-6 flex flex-wrap items-center gap-4 p-4">
         <span className="text-sm font-medium">Conflictos por tarea</span>

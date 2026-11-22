@@ -1,5 +1,5 @@
 import { AlertTriangle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Header } from "./components/Header";
 import type { Algorithm } from "./engine/types";
 import { useEngineMeta, usePlan, useRoute } from "./state";
@@ -14,12 +14,6 @@ export function App() {
   const [text, setText] = useState("");
   const [algorithm, setAlgorithm] = useState<Algorithm>("dsatur");
   const { view, error } = usePlan(text, algorithm, meta !== null);
-
-  // Primer ejemplo como punto de partida.
-  useEffect(() => {
-    if (meta && !text) setText(meta.examples[0]?.text ?? "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cargar el motor
-  }, [meta]);
 
   const canAdvance = view !== null && error === null;
   const needsPlan = route === "conflictos" || route === "plan";

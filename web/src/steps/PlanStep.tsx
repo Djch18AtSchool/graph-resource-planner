@@ -141,10 +141,15 @@ export function PlanStep({ view, setAlgorithm, onBack }: { view: PlanView; setAl
   const m = view.metrics;
   return (
     <section>
-      <StepTitle number={3} title="Plan de ejecución">
-        Las tareas de un mismo lote corren al mismo tiempo porque no comparten ningún recurso. Los lotes se ejecutan
-        uno después del otro, y cada uno termina cuando acaba su tarea más larga.
-      </StepTitle>
+      <StepTitle
+        number={3}
+        title="Plan de ejecución"
+        info={<>
+          Las tareas de un mismo lote corren al mismo tiempo porque no comparten ningún recurso. Los lotes se ejecutan
+          uno después del otro, y cada uno termina cuando acaba su tarea más larga. El número mínimo de lotes posible es
+          el <strong className="font-semibold text-ink">número cromático χ(G)</strong> del grafo de conflictos.
+        </>}
+      />
 
       <Verdict view={view} setAlgorithm={setAlgorithm} />
 
